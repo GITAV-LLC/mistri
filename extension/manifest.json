@@ -10,7 +10,8 @@
     "storage",
     "unlimitedStorage",
     "alarms",
-    "webNavigation"
+    "webNavigation",
+    "activeTab"
   ],
   "host_permissions": [
     "<all_urls>"
