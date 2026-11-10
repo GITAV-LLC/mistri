@@ -123,6 +123,10 @@ The build bundles a standalone Windows CPython 3.12 (python-build-standalone, wi
 
 **Releases** are built, signed and published automatically by GitHub Actions when a version tag is pushed; see [SIGNING.md](SIGNING.md). To sign a local build by hand instead: sign `mistri-setup-*.exe` with a code-signing certificate (`signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /f gitav.pfx dist\mistri-setup-*.exe`). This removes the SmartScreen warning once the certificate builds reputation.
 
+## Privacy
+
+mistri and mistri Shield collect no data about you. See [PRIVACY.md](PRIVACY.md).
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Third-party components keep their own licenses; see `installer/THIRD-PARTY-NOTICES.txt`.
