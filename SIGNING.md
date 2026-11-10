@@ -21,10 +21,10 @@ Allow about an hour of clicking, plus Microsoft's identity check (1 to 20 busine
 ### 2. Let GitHub sign (Microsoft Entra ID)
 
 1. **App registration.** Entra ID → App registrations → New registration → name `mistri-github-signing`. Copy its **Application (client) ID** and **Directory (tenant) ID**.
-2. **Federated credential.** In the app: Certificates & secrets → Federated credentials → Add → *GitHub Actions deploying Azure resources*. Organization `GITAV`, repository `mistri`, entity type **Environment**, environment name `release`.
+2. **Federated credential.** In the app: Certificates & secrets → Federated credentials → Add → *GitHub Actions deploying Azure resources*. Organization `GITAV-LLC`, repository `mistri`, entity type **Environment**, environment name `release`.
 3. **Signing role.** On the Artifact Signing account (or just the certificate profile): Access control (IAM) → Add role assignment → **Artifact Signing Certificate Profile Signer** → the `mistri-github-signing` app.
 
-### 3. GitHub (github.com/GITAV/mistri → Settings)
+### 3. GitHub (github.com/GITAV-LLC/mistri → Settings)
 
 1. **Environment.** Environments → New environment → `release`. Add yourself under *Required reviewers* so each signing waits for your approval.
 2. **Secrets** (Secrets and variables → Actions → Secrets): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
@@ -54,7 +54,7 @@ Within a day, installed copies of mistri see the new version on their Home page.
 
 ## How updates stay safe
 
-- mistri reads `https://api.github.com/repos/GITAV/mistri/releases/latest`, a plain public request with no account and no data about the PC.
+- mistri reads `https://api.github.com/repos/GITAV-LLC/mistri/releases/latest`, a plain public request with no account and no data about the PC.
 - It only offers versions newer than the one installed, and only installs after the user clicks **Update now**.
 - After downloading, it checks the size, then asks Windows to verify the Authenticode signature. Anything not validly signed by GITAV is deleted, not run.
 - Users can turn off the daily check on the Home page under *About mistri*.

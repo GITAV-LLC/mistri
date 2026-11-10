@@ -4,7 +4,7 @@
 
 ## Install
 
-1. Download the latest **`mistri-setup-<version>.exe`** (or the `.zip` if your browser blocks .exe files) from [Releases](https://github.com/GITAV/mistri/releases) and run it and follow the steps. It installs to `C:\Program Files\mistri` with its own private Python runtime, so nothing else on the PC is touched and nothing needs installing first.
+1. Download the latest **`mistri-setup-<version>.exe`** (or the `.zip` if your browser blocks .exe files) from [Releases](https://github.com/GITAV-LLC/mistri/releases) and run it and follow the steps. It installs to `C:\Program Files\mistri` with its own private Python runtime, so nothing else on the PC is touched and nothing needs installing first.
    - Releases are code-signed by GITAV, so Windows shows GITAV as the verified publisher.
    - Untick **ClamAV scanner** for a quick install. You can add it later from the Security page.
 2. Open **mistri** from the Start menu. It asks for administrator rights so every tool works.

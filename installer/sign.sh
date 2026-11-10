@@ -18,7 +18,7 @@ java -jar "$JSIGN_JAR" --storetype TRUSTEDSIGNING \
   --keystore "$AZURE_SIGNING_ENDPOINT" \
   --storepass "$AZURE_SIGNING_TOKEN" \
   --alias "$AZURE_SIGNING_ACCOUNT/$AZURE_SIGNING_PROFILE" \
-  --name "mistri" --url "https://github.com/GITAV/mistri" \
+  --name "mistri" --url "https://github.com/GITAV-LLC/mistri" \
   "$tmp" >&2
 cp "$tmp" "$f"
 rm -f "$tmp"
