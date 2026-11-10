@@ -1,0 +1,101 @@
+[
+ {
+  "id": 1,
+  "priority": 1,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "2mdn.net",
+    "33across.com",
+    "adform.net",
+    "adnxs.com",
+    "adservice.google.com",
+    "adsrvr.org",
+    "adsterra.com",
+    "advertising.com",
+    "amazon-adsystem.com",
+    "bidswitch.net",
+    "casalemedia.com",
+    "contextweb.com",
+    "criteo.com",
+    "criteo.net",
+    "doubleclick.net",
+    "exoclick.com",
+    "googleadservices.com",
+    "googlesyndication.com",
+    "indexww.com",
+    "juicyads.com",
+    "lijit.com",
+    "media.net",
+    "mgid.com",
+    "moatads.com",
+    "openx.net",
+    "outbrain.com",
+    "popads.net",
+    "popcash.net",
+    "propellerads.com",
+    "pubmatic.com",
+    "revcontent.com",
+    "rubiconproject.com",
+    "sharethrough.com",
+    "smartadserver.com",
+    "sovrn.com",
+    "taboola.com",
+    "teads.tv",
+    "yieldmo.com",
+    "zedo.com"
+   ],
+   "domainType": "thirdParty",
+   "excludedResourceTypes": [
+    "main_frame"
+   ]
+  }
+ },
+ {
+  "id": 2,
+  "priority": 1,
+  "action": {
+   "type": "block"
+  },
+  "condition": {
+   "requestDomains": [
+    "ads-twitter.com",
+    "adsymptotic.com",
+    "agkn.com",
+    "amplitude.com",
+    "analytics.tiktok.com",
+    "bat.bing.com",
+    "bluekai.com",
+    "chartbeat.com",
+    "clarity.ms",
+    "crazyegg.com",
+    "crwdcntrl.net",
+    "demdex.net",
+    "everesttech.net",
+    "exelator.com",
+    "fullstory.com",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "heap.io",
+    "hotjar.com",
+    "krxd.net",
+    "mixpanel.com",
+    "mouseflow.com",
+    "newrelic.com",
+    "nr-data.net",
+    "omtrdc.net",
+    "quantserve.com",
+    "rlcdn.com",
+    "scorecardresearch.com",
+    "segment.io",
+    "tapad.com"
+   ],
+   "domainType": "thirdParty",
+   "excludedResourceTypes": [
+    "main_frame"
+   ]
+  }
+ }
+]

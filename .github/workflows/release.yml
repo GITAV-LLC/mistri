@@ -1,0 +1,107 @@
+# Builds, signs and publishes a mistri release when a version tag (v1.2.0, ...) is pushed.
+# Signing uses Azure Artifact Signing (formerly Trusted Signing) through GitHub's OIDC login:
+# no certificate or password is stored in GitHub. See SIGNING.md for the one-time setup.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "Sign the installer (needs the Azure setup in SIGNING.md)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # create the GitHub release
+  id-token: write   # OIDC login to Azure for signing
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JSIGN_VERSION: "7.6"
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: release   # add required reviewers on this environment to approve each signing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q nsis osslsigncode
+          python -m pip install --upgrade uv pip
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          APP=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' mistri/__init__.py)
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "app=$APP tag=$TAG"
+          test "$APP" = "$TAG" || { echo "::error::Tag v$TAG doesn't match __version__ $APP in mistri/__init__.py"; exit 1; }
+
+      - name: Azure login (OIDC)
+        if: github.event_name == 'push' || inputs.sign
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Prepare signing
+        if: github.event_name == 'push' || inputs.sign
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/jsign.jar" "https://github.com/ebourg/jsign/releases/download/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+          TOKEN=$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          {
+            echo "JSIGN_JAR=$RUNNER_TEMP/jsign.jar"
+            echo "AZURE_SIGNING_TOKEN=$TOKEN"
+            echo "AZURE_SIGNING_ENDPOINT=${{ vars.AZURE_SIGNING_ENDPOINT }}"
+            echo "AZURE_SIGNING_ACCOUNT=${{ vars.AZURE_SIGNING_ACCOUNT }}"
+            echo "AZURE_SIGNING_PROFILE=${{ vars.AZURE_SIGNING_PROFILE }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build installer
+        run: ./installer/build.sh
+
+      - name: Verify signature
+        if: github.event_name == 'push' || inputs.sign
+        run: |
+          EXE=$(ls dist/mistri-setup-*.exe)
+          osslsigncode verify -in "$EXE" | tee verify.txt
+          grep -qi "GITAV" verify.txt || { echo "::error::Installer is not signed by GITAV"; exit 1; }
+
+      - name: Package the Chrome extension
+        run: |
+          VER=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' mistri/__init__.py)
+          (cd extension && zip -qr "../dist/mistri-shield-$VER.zip" . -x "_metadata/*")
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          NOTES="release-notes/$VER.md"
+          ARGS=(--title "mistri $VER" --verify-tag)
+          if [ -f "$NOTES" ]; then ARGS+=(--notes-file "$NOTES"); else ARGS+=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" "${ARGS[@]}" \
+            "dist/mistri-setup-$VER.exe" "dist/mistri-setup-$VER.zip" \
+            "dist/mistri-setup-$VER.exe.sha256" "dist/mistri-shield-$VER.zip"
+
+      - name: Keep the build (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mistri-installer
+          path: dist/

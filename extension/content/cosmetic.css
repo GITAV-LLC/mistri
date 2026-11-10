@@ -1,0 +1,19 @@
+/* Hides common ad containers left empty after their network requests are blocked.
+   Kept deliberately short and specific so it never hides real page content. */
+ins.adsbygoogle,
+.adsbygoogle,
+[id^="google_ads_iframe"],
+[id^="div-gpt-ad"],
+[id^="aswift_"],
+iframe[src*="doubleclick.net"],
+iframe[src*="googlesyndication.com"],
+iframe[id^="google_ads_frame"],
+amp-ad,
+amp-embed[type="taboola"],
+.trc_rbox_container,
+.OUTBRAIN,
+[data-google-query-id],
+[data-ad-slot],
+[data-adunit-path] {
+  display: none !important;
+}

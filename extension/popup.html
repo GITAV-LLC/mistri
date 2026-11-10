@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>mistri Shield</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/32.png" alt="" width="22" height="22">
+    <div>
+      <h1>mistri Shield</h1>
+      <p id="site" class="muted">—</p>
+    </div>
+  </header>
+
+  <section class="site-card">
+    <div>
+      <div class="big" id="blocked">–</div>
+      <div class="muted">blocked on this page</div>
+    </div>
+    <button id="pause" class="ghost" disabled>Pause on this site</button>
+  </section>
+
+  <section class="toggles">
+    <label><span><b>Ads</b><small>EasyList, Peter Lowe</small></span><input type="checkbox" data-key="ads"></label>
+    <label><span><b>Trackers</b><small>EasyPrivacy</small></span><input type="checkbox" data-key="trackers"></label>
+    <label><span><b>Malware &amp; scam sites</b><small>URLhaus, uBlock Badware</small></span><input type="checkbox" data-key="malware"></label>
+    <label><span><b>Popup guard</b><small>Closes ad popups, quiets notification prompts</small></span><input type="checkbox" data-key="popups"></label>
+    <label><span><b>Reject optional cookies</b><small>Clicks "reject" on cookie banners</small></span><input type="checkbox" data-key="cookies"></label>
+    <label><span><b>Hide empty ad boxes</b><small>Small, conservative CSS</small></span><input type="checkbox" data-key="cosmetic"></label>
+  </section>
+
+  <footer>
+    <span id="lists" class="muted">Loading…</span>
+    <button id="update" class="link">Update lists</button>
+  </footer>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

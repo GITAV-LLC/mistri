@@ -1,0 +1,40 @@
+# Checks every push and pull request: lint, extension syntax, and an unsigned installer build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install tools
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q nsis
+          python -m pip install --upgrade uv pip pyflakes psutil
+      - name: Lint Python
+        run: python -m pyflakes mistri
+      - name: Check the extension
+        run: |
+          for f in extension/content/*.js extension/popup.js extension/blocked.js; do node --check "$f"; done
+          python -c "import json; json.load(open('extension/manifest.json'))"
+      - name: Command line smoke test
+        run: python -m mistri clean --list
+      - name: Build installer (unsigned)
+        run: ./installer/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mistri-installer-unsigned
+          path: dist/mistri-setup-*.zip
