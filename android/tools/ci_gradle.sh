@@ -8,7 +8,7 @@ if ./gradlew --no-daemon --console=plain "$@" 2>&1 | tee "$log"; then
   exit 0
 fi
 grep -E "^(e: |FAILURE|\* What went wrong|> )|FAILED|AssertionError|Exception|Timed out waiting" "$log" \
-  | grep -v "^\s*at androidx\|^\s*at android\.\|^\s*at java" | head -54 | split -l 6 - chunk_ || true
+  | grep -v "^> Task\|^\s*at androidx\|^\s*at android\.\|^\s*at java" | head -54 | split -l 6 - chunk_ || true
 for f in chunk_*; do
   [ -f "$f" ] || continue
   msg=$(sed 's/%/%25/g' "$f" | sed ':a;N;$!ba;s/\n/%0A/g')

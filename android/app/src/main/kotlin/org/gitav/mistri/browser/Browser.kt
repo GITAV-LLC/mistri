@@ -585,7 +585,13 @@ class Browser(
 
         override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
             val address = url ?: ""
-            if (address.startsWith("http")) tab.url = address
+            if (address.startsWith("http://") || address.startsWith("https://")) {
+                // The committed address is what requests are judged against. This also covers
+                // redirects and pages shown from text (reader view), which never pass through
+                // shouldInterceptRequest as a main-frame request.
+                tab.url = address
+                tab.pageHost = Uri.parse(address).host?.lowercase() ?: ""
+            }
             tab.canBack = view.canGoBack()
             tab.canForward = view.canGoForward()
         }
