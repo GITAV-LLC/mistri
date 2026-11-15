@@ -422,7 +422,7 @@ private fun HomePage(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.semantics { heading() },
             )
-            Text("پینڈو", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text("پینڈو", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
             Text("by GITAV", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(8.dp))

@@ -185,7 +185,7 @@ class SmokeTest {
                     "<body style='font:18px sans-serif;padding:16px'><h1>A page</h1><p>Some text on a page.</p>" +
                     "<img src='https://ad.doubleclick.net/pixel.gif'></body></html>",
             )
-            waitFor("the ad request to be blocked") { it.browser.current!!.blocked == 1 }
+            waitFor("the ad request to be blocked") { it.browser.current!!.title == "A page" && it.browser.current!!.blocked == 1 }
             compose.onNode(hasContentDescription("Shield.", substring = true)).performClick()
             shot("15-shield-sheet")
         } finally {
@@ -225,6 +225,18 @@ class SmokeTest {
         onActivity { it.browser.load(it.browser.current!!, "https://malware-site.test/payload") }
         waitFor("the warning page") { it.browser.current!!.title == "Blocked: dangerous site" }
         assertTrue(onActivity { it.settings.history.isEmpty() })
+
+        // The count of blocked requests must start again on the next page, not carry over.
+        Thread.sleep(1500)
+        assertEquals(0, onActivity { it.browser.current!!.blocked })
+        loadPage(
+            "https://example.com/",
+            "<html><head><title>next</title></head><body><img src='https://ad.doubleclick.net/pixel.gif'></body></html>",
+        )
+        waitFor("the next page") { it.browser.current!!.title == "next" }
+        waitFor("one blocked request on the next page") { it.browser.current!!.blocked == 1 }
+        Thread.sleep(1500)
+        assertEquals(1, onActivity { it.browser.current!!.blocked })
     }
 
     @Test

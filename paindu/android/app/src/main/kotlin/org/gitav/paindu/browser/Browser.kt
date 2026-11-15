@@ -517,8 +517,11 @@ class Browser(
             }
 
             if (shield.shouldBlock(host, tab.pageHost)) {
-                val n = tab.blockedCounter.incrementAndGet()
-                main.post { tab.blocked = n }
+                // Requests made by our own warning page (its favicon) are dropped but not counted.
+                if (tab.warnedHost.isEmpty()) {
+                    val n = tab.blockedCounter.incrementAndGet()
+                    main.post { tab.blocked = n }
+                }
                 return emptyResponse()
             }
             return null
@@ -545,6 +548,9 @@ class Browser(
             val host = if (isWeb) Uri.parse(address).host?.lowercase() ?: "" else ""
             tab.reader = tab.readerPending
             tab.readerPending = false
+            // A new page starts its count from zero, however it was loaded.
+            tab.blockedCounter.set(0)
+            tab.blocked = 0
             if (isWeb) {
                 tab.url = address
                 tab.pageHost = host
