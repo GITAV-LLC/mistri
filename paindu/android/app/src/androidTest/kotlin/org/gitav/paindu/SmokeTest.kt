@@ -1,8 +1,10 @@
 package org.gitav.paindu
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -118,6 +120,77 @@ class SmokeTest {
         compose.onNodeWithText("Browsing").performScrollTo().performClick()
         compose.onNodeWithText("Startpage").performScrollTo().performClick()
         assertEquals("startpage", onActivity { it.settings.searchEngine })
+    }
+
+    /** Saves a half-size screenshot where the build collects extra test output. */
+    private fun shot(name: String) {
+        compose.waitForIdle()
+        Thread.sleep(600)
+        val path = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir") ?: return
+        val dir = File(path)
+        dir.mkdirs()
+        val full = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot() ?: return
+        val half = Bitmap.createScaledBitmap(full, full.width / 2, full.height / 2, true)
+        File(dir, "$name.jpg").outputStream().use { half.compress(Bitmap.CompressFormat.JPEG, 70, it) }
+    }
+
+    private fun darkTheme(on: Boolean) {
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("cmd uimode night " + if (on) "yes" else "no").close()
+        Thread.sleep(2000)
+    }
+
+    /** Not a check: a walk through the app that records what each screen looks like. */
+    @Test
+    fun recordScreens() {
+        try {
+            shot("01-home")
+            compose.onNodeWithContentDescription("Open: Device care").performScrollTo().performClick()
+            shot("02-care-security")
+            compose.onNodeWithText("Storage").performClick()
+            shot("03-care-storage")
+            compose.onNodeWithText("Health").performClick()
+            shot("04-care-health")
+            compose.onNodeWithContentDescription("Back to the browser").performClick()
+
+            compose.onNodeWithContentDescription("Menu").performClick()
+            shot("05-menu")
+            compose.onNodeWithText("Settings").performClick()
+            shot("06-settings-shield")
+            compose.onNodeWithText("Browsing").performScrollTo().performClick()
+            shot("07-settings-browsing")
+            compose.onNodeWithText("Reading").performScrollTo().performClick()
+            shot("08-settings-reading")
+            compose.onNodeWithText("Privacy").performScrollTo().performClick()
+            shot("09-settings-privacy")
+            compose.onNodeWithText("About").performScrollTo().performClick()
+            shot("10-settings-about")
+
+            darkTheme(true)
+            shot("11-dark-settings-about")
+            compose.onNodeWithText("Shield").performScrollTo().performClick()
+            shot("12-dark-settings-shield")
+            compose.onNodeWithContentDescription("Back to the browser").performClick()
+            shot("13-dark-home")
+            darkTheme(false)
+
+            waitFor("block lists loaded") { it.shield.totalDomains > 0 }
+            onActivity { it.browser.load(it.browser.current!!, "https://malware-site.test/payload") }
+            waitFor("the warning page") { it.browser.current!!.title == "Blocked: dangerous site" }
+            shot("14-warning")
+
+            loadPage(
+                "https://example.com/",
+                "<html><head><title>A page</title><meta name='viewport' content='width=device-width'></head>" +
+                    "<body style='font:18px sans-serif;padding:16px'><h1>A page</h1><p>Some text on a page.</p>" +
+                    "<img src='https://ad.doubleclick.net/pixel.gif'></body></html>",
+            )
+            waitFor("the ad request to be blocked") { it.browser.current!!.blocked == 1 }
+            compose.onNode(hasContentDescription("Shield.", substring = true)).performClick()
+            shot("15-shield-sheet")
+        } finally {
+            darkTheme(false)
+        }
     }
 
     @Test

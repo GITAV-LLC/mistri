@@ -69,14 +69,24 @@ jobs:
           api-level: 34
           arch: x86_64
           target: google_apis
+          profile: pixel_6
           disable-animations: true
           working-directory: paindu/android
           script: tools/ci_gradle.sh connectedDebugAndroidTest
+      - name: Print the recorded screens
+        if: always()
+        run: |
+          find paindu/android/app/build/outputs -name '*.jpg' | sort | while read -r f; do
+            echo "SHOT-BEGIN $(basename "$f")"
+            base64 -w 3000 "$f"
+            echo "SHOT-END"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-device-test-reports
           path: |
             paindu/android/app/build/reports/androidTests/
+            paindu/android/app/build/outputs/connected_android_test_additional_output/
             paindu/android/gradle-*.log
           if-no-files-found: ignore
