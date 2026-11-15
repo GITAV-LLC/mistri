@@ -89,10 +89,6 @@ It uses Chrome's `declarativeNetRequest`, so Chrome itself does the blocking and
 
 Limits worth knowing: the extension blocks whole domains only, not the fine-grained path and cosmetic rules full blockers use, so some ads served from a site's own domain (YouTube, for example) will still show. For maximum blocking, run uBlock Origin Lite alongside it and switch off Shield's Ads/Trackers toggles. Cookie auto-reject works on most banners, but sites with unusual banners may still need one click from you.
 
-## mistri for Android (in development)
-
-A web browser with mistri Shield built in, plus a Device care section, in [`android/`](android/). It is a prototype: it builds in CI but hasn't had a release yet. See [`android/README.md`](android/README.md) for what it does, how to build it, and its limits.
-
 ## Honest limits
 
 - mistri is an on-demand toolkit. Real-time protection still comes from Microsoft Defender, which stays on. If another real-time antivirus (such as Malwarebytes Premium) is registered, Windows turns Defender's antivirus off and its on-demand scans fail with an error in the output. Use ClamAV or that product's scanner instead.
