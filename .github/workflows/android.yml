@@ -1,0 +1,62 @@
+# Builds mistri for Android on every change to it: unit tests, lint and an unsigned debug APK.
+name: Android
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - "extension/content/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "extension/content/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Signature builder self-test
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          open("hashes.txt", "w").write("\n".join(hashlib.sha256(str(i).encode()).hexdigest() for i in range(1200)))
+          PY
+          python3 android/tools/build_signatures.py hashes.txt signatures.bin
+          test "$(stat -c %s signatures.bin)" -eq $((16 + 1200 * 8))
+      - name: Unit tests, lint and debug build
+        working-directory: android
+        run: |
+          set -o pipefail
+          if ! ./gradlew --no-daemon --console=plain testDebugUnitTest assembleDebug lintDebug 2>&1 | tee build.log; then
+            # Surface the compiler's own messages as annotations so they are easy to find.
+            grep -E "^(e: |w: .*error|FAILURE|\* What went wrong|> |.*Test.* FAILED|.*AssertionError)" build.log | head -60 | split -l 6 - chunk_ || true
+            for f in chunk_*; do
+              [ -f "$f" ] || continue
+              msg=$(sed 's/%/%25/g' "$f" | sed ':a;N;$!ba;s/\n/%0A/g')
+              echo "::error title=Android build::$msg"
+            done
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mistri-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-reports
+          path: |
+            android/app/build/reports/
+            android/build.log
+          if-no-files-found: ignore
