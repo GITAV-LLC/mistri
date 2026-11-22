@@ -55,7 +55,7 @@ paindu itself is deliberately small: tabs, bookmarks, downloads and Shield. Ever
 
 | Plugin | What it adds | Status |
 |---|---|---|
-| whush | Private tabs with their own cookies, storage and cache, deleted when the last whush tab closes. Not in history, not restored, not in screenshots | Available |
+| whush | Private tabs with their own cookies, storage and cache, wiped when the last whush tab closes; every whush session starts in a brand-new compartment. Not in history, not restored, not in screenshots | Available |
 | History | paindu keeps no history without it. Adds history, address-bar suggestions and "continue where you left off". Switching it off deletes the history | Available |
 | Device care | The Security, Storage and Health checks below | Available |
 | Passwords | Encrypted vault unlocked by the screen lock; breach check on import; no plain-text export | Planned |

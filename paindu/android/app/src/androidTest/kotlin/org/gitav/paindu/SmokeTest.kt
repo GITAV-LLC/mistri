@@ -91,7 +91,7 @@ class SmokeTest {
 
     private fun loadPage(baseUrl: String, html: String) {
         waitFor("block lists loaded") { it.shield.totalDomains > 0 }
-        onActivity { it.browser.pageOf(it.browser.current!!).loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", baseUrl) }
+        onActivity { it.browser.showHtml(it.browser.current!!, baseUrl, html) }
     }
 
     @Test
@@ -231,12 +231,16 @@ class SmokeTest {
         val saved = context.getSharedPreferences("paindu", Context.MODE_PRIVATE).getString("session", "") ?: ""
         assertEquals("only the normal tab is saved: $saved", 1, org.json.JSONArray(saved).length())
 
-        // Closing the last whush tab deletes the whole compartment.
+        // Closing the last whush tab wipes what the session stored.
         onActivity { it.browser.closeWhushTabs() }
-        Thread.sleep(4000)
-        val left = onActivity { androidx.webkit.ProfileStore.getInstance().allProfileNames.toString() }
-        val note = onActivity { it.browser.whushCleanupNote }
-        assertFalse("the whush profile should be deleted; profiles=$left note=$note", left.contains("whush"))
+        Thread.sleep(1500)
+        val leftovers = onActivity {
+            val store = androidx.webkit.ProfileStore.getInstance()
+            store.allProfileNames.filter { it.startsWith("whush-") }
+                .joinToString(";") { store.getProfile(it)?.cookieManager?.getCookie("https://example.com/") ?: "" }
+        }
+        assertFalse("the closed whush session's cookies should be wiped, got '$leftovers'", leftovers.contains("seen="))
+        assertTrue("the normal tab's cookie must survive, got '${normalCookies()}'", normalCookies().contains("seen=normal"))
 
         // A fresh whush tab starts with nothing.
         onActivity { it.browser.addWhushTab() }

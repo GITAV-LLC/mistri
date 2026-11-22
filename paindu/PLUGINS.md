@@ -30,7 +30,7 @@ Defined in [`android/app/src/main/kotlin/org/gitav/paindu/plugins/Plugins.kt`](a
 
 | id | Name | Status |
 |---|---|---|
-| `whush` | whush: private tabs in a separate, self-deleting compartment | Available |
+| `whush` | whush: private tabs in a separate compartment that is wiped when they close | Available |
 | `history` | History, address-bar suggestions, "continue where you left off" | Available |
 | `care` | Device care | Available |
 | `passwords` | Encrypted password vault | Planned |

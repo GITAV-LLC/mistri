@@ -35,8 +35,9 @@ object Plugins {
             WHUSH, "whush",
             "Private tabs that vanish. Whush: gone.",
             "A whush tab keeps its cookies, sign-ins and site data in a separate compartment from your " +
-                "normal tabs. When you close the last whush tab, the whole compartment is deleted. whush " +
-                "tabs are never added to history, never reopened next time, and can't be screenshotted.\n\n" +
+                "normal tabs. When you close the last whush tab, everything in the compartment is wiped, " +
+                "and the next whush tab starts in a brand-new one. whush tabs are never added to " +
+                "history, never reopened next time, and can't be screenshotted.\n\n" +
                 "What whush doesn't do: it doesn't hide your browsing from your mobile network, Wi-Fi " +
                 "owner, employer or the sites themselves. Files you download are kept.",
             R.drawable.ic_whush,

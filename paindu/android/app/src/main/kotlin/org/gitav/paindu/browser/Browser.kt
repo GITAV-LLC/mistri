@@ -167,6 +167,7 @@ class Browser(
         tab.script = null
         (wv.parent as? ViewGroup)?.removeView(wv)
         wv.stopLoading()
+        if (tab.whush) wv.clearCache(true) // whush pages leave nothing in the cache either
         wv.destroy()
     }
 
@@ -272,39 +273,63 @@ class Browser(
         tabs.filter { it.whush }.forEach { closeTab(it) }
     }
 
-    /** Why the last attempt to delete whush's data didn't succeed, if it didn't. For diagnosis. */
-    var whushCleanupNote: String? = null
-        private set
+    /**
+     * The compartment the current whush tabs share. Each whush session gets a brand-new
+     * one, so a new session can never see anything from an earlier one.
+     */
+    private var whushProfile: String? = null
 
-    /** Once the last whush tab is closed, delete everything whush tabs stored. */
+    private fun whushProfileName(): String =
+        whushProfile ?: ("$WHUSH_PREFIX${UUID.randomUUID().toString().take(8)}").also { whushProfile = it }
+
+    /**
+     * Once the last whush tab is closed, wipe what the session stored: cookies, site
+     * data and cache. The web engine won't let a compartment be removed outright while
+     * the app that used it is still running, so the emptied shell is removed the next
+     * time paindu starts (see [removeOldWhushProfiles]).
+     */
     private fun forgetWhushIfDone() {
         if (!whushSupported || tabs.any { it.whush }) return
-        // The pages have to be fully gone before their profile can be deleted.
-        main.postDelayed({ deleteWhushProfile() }, 400)
+        val name = whushProfile ?: return
+        whushProfile = null
+        try {
+            val profile = ProfileStore.getInstance().getProfile(name) ?: return
+            profile.cookieManager.removeAllCookies(null)
+            profile.cookieManager.flush()
+            profile.webStorage.deleteAllData()
+        } catch (e: Exception) {
+            // Nothing more can be done now; the whole compartment goes at the next start.
+        }
     }
 
-    private fun deleteWhushProfile(attempt: Int = 0) {
-        if (!whushSupported || tabs.any { it.whush }) return
+    /** At start-up, before anything has used them, remove compartments left by earlier whush sessions. */
+    private fun removeOldWhushProfiles() {
+        if (!whushSupported) return
         try {
             val store = ProfileStore.getInstance()
-            if (WHUSH_PROFILE in store.allProfileNames) store.deleteProfile(WHUSH_PROFILE)
+            for (name in store.allProfileNames) {
+                if (name.startsWith(WHUSH_PREFIX)) {
+                    try {
+                        store.deleteProfile(name)
+                    } catch (e: Exception) {
+                        // Already emptied; it will be tried again next time.
+                    }
+                }
+            }
         } catch (e: Exception) {
-            // A closed page can hold its profile for a moment longer. Try again shortly;
-            // failing that, it is deleted the next time paindu starts.
-            whushCleanupNote = "${e.javaClass.simpleName}: ${e.message}"
-            if (attempt < 5) main.postDelayed({ deleteWhushProfile(attempt + 1) }, 500)
+            // The web engine isn't ready to list profiles; try again next start.
         }
     }
 
     private fun cookiesFor(tab: Tab): CookieManager =
-        if (tab.whush) ProfileStore.getInstance().getOrCreateProfile(WHUSH_PROFILE).cookieManager
+        if (tab.whush) ProfileStore.getInstance().getOrCreateProfile(whushProfileName()).cookieManager
         else CookieManager.getInstance()
 
     // ------------------------------------------------------------ session
 
     /** Reopen the tabs from last time, plus a link another app asked us to open. */
     fun restore(incoming: String?) {
-        deleteWhushProfile() // left over if paindu was killed with whush tabs open
+        removeOldWhushProfiles()
         if (settings.restoreTabs.value) {
             try {
                 val saved = JSONArray(settings.prefs.getString("session", "[]") ?: "[]")
@@ -344,7 +369,7 @@ class Browser(
         scope.cancel()
         tabs.toList().forEach { destroy(it) }
         tabs.clear()
-        deleteWhushProfile()
+        forgetWhushIfDone()
     }
 
     /** Switch a plugin on or off, with whatever tidying up that needs. */
@@ -431,11 +456,23 @@ class Browser(
                 notice = Notice("Reader view couldn't find an article on this page.")
             } else {
                 tab.readerPending = true
-                pageOf(tab).loadDataWithBaseURL(
-                    pageUrl, readerPage(article?.optString("t").orEmpty(), content), "text/html", "utf-8", pageUrl,
-                )
+                showHtml(tab, pageUrl, readerPage(article?.optString("t").orEmpty(), content))
             }
         }
+    }
+
+    /**
+     * Show a page from text (reader view), treated as if it had come from [baseUrl].
+     * Such a page never passes through shouldInterceptRequest as a navigation, so what
+     * requests are judged against is set here, before the page can ask for anything.
+     */
+    fun showHtml(tab: Tab, baseUrl: String, html: String) {
+        val host = Uri.parse(baseUrl).host?.lowercase() ?: ""
+        tab.pageHost = host
+        if (host != tab.warnedHost) tab.warnedHost = ""
+        tab.blockedCounter.set(0)
+        tab.blocked = 0
+        pageOf(tab).loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", baseUrl)
     }
 
     fun toggleReadAloud(tab: Tab) {
@@ -561,8 +598,9 @@ class Browser(
         if (tab.whush) {
             // Must happen before the page is used for anything: whush tabs keep their
             // cookies, storage and cache in a profile of their own.
-            ProfileStore.getInstance().getOrCreateProfile(WHUSH_PROFILE)
-            WebViewCompat.setProfile(wv, WHUSH_PROFILE)
+            val compartment = whushProfileName()
+            ProfileStore.getInstance().getOrCreateProfile(compartment)
+            WebViewCompat.setProfile(wv, compartment)
         }
         // Let Android reclaim a background tab's memory before a visible one's.
         wv.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
@@ -747,9 +785,9 @@ class Browser(
             val host = if (isWeb) Uri.parse(address).host?.lowercase() ?: "" else ""
             tab.reader = tab.readerPending
             tab.readerPending = false
-            // A new page starts its count from zero, however it was loaded.
-            tab.blockedCounter.set(0)
-            tab.blocked = 0
+            // The count of blocked requests is reset where a navigation begins (the main-frame
+            // request, or showHtml), not here: this callback can arrive after the new page
+            // has already made requests.
             if (isWeb) {
                 tab.url = address
                 tab.pageHost = host
@@ -877,7 +915,7 @@ class Browser(
         private const val POPUP_WINDOW_MS = 8000L
         private const val MAX_RESTORED_TABS = 12
         private const val LAST = "last"
-        private const val WHUSH_PROFILE = "whush"
+        private const val WHUSH_PREFIX = "whush-"
         private const val IDLE_SLEEP_MS = 30L * 60 * 1000
 
         /** Text-to-speech takes a few thousand characters at a time; split on sentence ends. */

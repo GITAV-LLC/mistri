@@ -24,7 +24,7 @@ These are kept in the app's private storage, on your device only. Clearing the a
 
 ## whush tabs
 
-whush tabs keep their cookies, sign-ins, site data and cache in a separate compartment from normal tabs. Closing the last whush tab deletes that compartment. whush tabs are never added to history, never reopened, never backed up, and are hidden from screenshots. whush does not hide your browsing from your network provider or the sites you visit.
+whush tabs keep their cookies, sign-ins, site data and cache in a separate compartment from normal tabs. Closing the last whush tab wipes that compartment, and the next whush tab starts in a brand-new one. whush tabs are never added to history, never reopened, never backed up, and are hidden from screenshots. whush does not hide your browsing from your network provider or the sites you visit.
 
 ## Backup to your Google Drive
 
