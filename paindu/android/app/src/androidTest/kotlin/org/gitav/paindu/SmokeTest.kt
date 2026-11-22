@@ -41,11 +41,22 @@ class SmokeTest {
     @Before
     fun start() {
         // A clean slate, no list downloads, and one made-up "malware" site on the URLhaus list.
-        context.getSharedPreferences("paindu", Context.MODE_PRIVATE).edit().clear()
-            .putBoolean("autoUpdate", false).commit()
         val lists = File(context.filesDir, "lists")
         lists.mkdirs()
         File(lists, "urlhaus.txt").writeText("malware-site.test\n")
+        // Most tests start past the walkthrough, with every plugin switched on.
+        launch(setupDone = true, plugins = listOf("whush", "history", "care"))
+    }
+
+    /** Start paindu from a clean slate with the given saved settings. */
+    private fun launch(setupDone: Boolean, plugins: List<String> = emptyList(), session: String? = null) {
+        if (::scenario.isInitialized) scenario.close()
+        val edit = context.getSharedPreferences("paindu", Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("autoUpdate", false)
+            .putBoolean("setupDone", setupDone)
+        for (id in plugins) edit.putBoolean("plugin.$id", true)
+        if (session != null) edit.putString("session", session).putInt("sessionIndex", 0)
+        edit.commit()
         scenario = ActivityScenario.launch(MainActivity::class.java)
     }
 
@@ -76,7 +87,7 @@ class SmokeTest {
 
     private fun loadPage(baseUrl: String, html: String) {
         waitFor("block lists loaded") { it.shield.totalDomains > 0 }
-        onActivity { it.browser.current!!.webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", baseUrl) }
+        onActivity { it.browser.pageOf(it.browser.current!!).loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", baseUrl) }
     }
 
     @Test
@@ -94,15 +105,28 @@ class SmokeTest {
         compose.onNodeWithText("Security updates").assertExists()
         compose.onNodeWithContentDescription("Back to the browser").performClick()
 
+        // Plugins: Available, Planned
+        compose.onNodeWithContentDescription("Open: Plugins").performScrollTo().performClick()
+        compose.onNodeWithText("Use whush").assertExists()
+        compose.onNodeWithText("Use History").assertExists()
+        compose.onNodeWithText("Planned").performClick()
+        compose.onNodeWithText("Passwords").assertExists()
+        compose.onNodeWithText("Bring your own VPN").assertExists()
+        compose.onNodeWithContentDescription("Back to the browser").performClick()
+
         // Settings: Shield, Browsing, Reading, Privacy, About
         compose.onNodeWithContentDescription("Menu").performClick()
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithText("Block ads").assertIsDisplayed()
         compose.onNodeWithText("Browsing").performScrollTo().performClick()
-        compose.onNodeWithText("Search engine").assertIsDisplayed()
+        compose.onNodeWithText("Default browser").assertIsDisplayed()
+        compose.onNodeWithText("Search engine").assertExists()
+        compose.onNodeWithText("Sleeping tabs").assertExists()
         compose.onNodeWithText("Reading").performScrollTo().performClick()
         compose.onNodeWithText("Page text size").assertIsDisplayed()
         compose.onNodeWithText("Privacy").performScrollTo().performClick()
+        compose.onNodeWithText("Screen lock").assertExists()
+        compose.onNodeWithText("Backup to Google Drive").assertExists()
         compose.onNodeWithText("Clear browsing data").assertExists()
         compose.onNodeWithText("About").performScrollTo().performClick()
         compose.onNodeWithText("Open-source credits").assertExists()
@@ -120,6 +144,136 @@ class SmokeTest {
         compose.onNodeWithText("Browsing").performScrollTo().performClick()
         compose.onNodeWithText("Startpage").performScrollTo().performClick()
         assertEquals("startpage", onActivity { it.settings.searchEngine })
+    }
+
+    @Test
+    fun firstRunWalkthroughAsksOnceAndStartsSimple() {
+        launch(setupDone = false)
+        compose.onNodeWithText("Welcome to paindu").assertIsDisplayed()
+        shot("20-setup-welcome")
+        compose.onNodeWithText("Start").performClick()
+        compose.onNodeWithText("Open links with paindu?").assertIsDisplayed()
+        compose.onNodeWithText("Make paindu my default browser").assertExists()
+        shot("21-setup-default-browser")
+        compose.onNodeWithText("Next").performClick()
+        compose.onNodeWithText("Lock paindu?").assertIsDisplayed()
+        shot("22-setup-lock")
+        compose.onNodeWithText("Next").performClick()
+        compose.onNodeWithText("Add anything?").assertIsDisplayed()
+        shot("23-setup-plugins")
+        compose.onNodeWithText("Use History").performScrollTo().performClick()
+        compose.onNodeWithText("Finish").performClick()
+
+        // Setup is over: the browser is showing, only the chosen plugin is on, nothing was forced.
+        compose.onNodeWithContentDescription("Address bar").assertIsDisplayed()
+        assertTrue(onActivity { it.settings.setupDone.value })
+        assertTrue(onActivity { it.settings.pluginOn("history") })
+        assertFalse(onActivity { it.settings.pluginOn("whush") })
+        assertFalse(onActivity { it.settings.pluginOn("care") })
+        assertFalse(onActivity { it.settings.appLock.value })
+        compose.onNodeWithContentDescription("Open: Device care").assertDoesNotExist()
+    }
+
+    @Test
+    fun skippingSetupLeavesEverythingOff() {
+        launch(setupDone = false)
+        compose.onNodeWithText("Skip setup").performClick()
+        compose.onNodeWithContentDescription("Address bar").assertIsDisplayed()
+        assertFalse(onActivity { it.settings.pluginOn("history") || it.settings.pluginOn("whush") || it.settings.pluginOn("care") })
+        // No history plugin: visiting a page must leave no trace.
+        loadPage("https://example.com/", "<html><head><title>visited</title></head><body>hello</body></html>")
+        waitFor("the page") { it.browser.current!!.title == "visited" }
+        Thread.sleep(800)
+        assertTrue(onActivity { it.settings.history.isEmpty() })
+        compose.onNodeWithContentDescription("Menu").performClick()
+        compose.onNodeWithText("History").assertDoesNotExist()
+        compose.onNodeWithText("New whush tab").assertDoesNotExist()
+        compose.onNodeWithText("Device care").assertDoesNotExist()
+        compose.onNodeWithText("Plugins").assertExists()
+    }
+
+    @Test
+    fun screenLockNeedsAPhoneScreenLock() {
+        // The emulator has no PIN set, so paindu must refuse to lock rather than lock the user out.
+        assertFalse(onActivity { it.canUseScreenLock() })
+        assertFalse(onActivity { it.setAppLock(true) })
+        assertFalse(onActivity { it.settings.appLock.value })
+        assertFalse(onActivity { it.locked })
+    }
+
+    @Test
+    fun whushTabsKeepTheirOwnCookiesAndForgetThem() {
+        if (!onActivity { it.browser.whushSupported }) return
+        val cookies = android.webkit.CookieManager.getInstance()
+        // A normal tab sets a cookie.
+        loadPage("https://example.com/", "<html><head><title>normal</title></head><body><script>document.cookie='seen=normal; path=/; max-age=600';document.title='normal-set'</script></body></html>")
+        waitFor("the normal tab's cookie") { it.browser.current!!.title == "normal-set" }
+        assertTrue((onActivity { cookies.getCookie("https://example.com/") } ?: "").contains("seen=normal"))
+
+        // A whush tab on the same site can't see it, and its own cookie stays out of the normal store.
+        onActivity { it.browser.addWhushTab() }
+        assertTrue(onActivity { it.browser.current!!.whush })
+        loadPage("https://example.com/", "<html><head><title>w</title></head><body><script>var had=document.cookie.indexOf('seen=normal')>=0;document.cookie='seen=whush; path=/; max-age=600';document.title=had?'leaked':'separate'</script></body></html>")
+        waitFor("the whush tab to run") { it.browser.current!!.title == "separate" || it.browser.current!!.title == "leaked" }
+        assertEquals("separate", onActivity { it.browser.current!!.title })
+        Thread.sleep(500)
+        assertFalse((onActivity { cookies.getCookie("https://example.com/") } ?: "").contains("seen=whush"))
+
+        // whush leaves no history and isn't saved for next time.
+        assertTrue(onActivity { a -> a.settings.history.none { it.title == "separate" } })
+        onActivity { it.browser.saveSession() }
+        val saved = context.getSharedPreferences("paindu", Context.MODE_PRIVATE).getString("session", "") ?: ""
+        assertEquals(1, org.json.JSONArray(saved).length())
+
+        // Closing the last whush tab deletes the whole compartment.
+        onActivity { it.browser.closeWhushTabs() }
+        Thread.sleep(2500)
+        assertFalse(onActivity { androidx.webkit.ProfileStore.getInstance().allProfileNames.contains("whush") })
+        // A fresh whush tab starts with nothing.
+        onActivity { it.browser.addWhushTab() }
+        loadPage("https://example.com/", "<html><head><title>w2</title></head><body><script>document.title=document.cookie.indexOf('seen=whush')>=0?'remembered':'forgotten'</script></body></html>")
+        waitFor("the second whush tab") { it.browser.current!!.title == "forgotten" || it.browser.current!!.title == "remembered" }
+        assertEquals("forgotten", onActivity { it.browser.current!!.title })
+    }
+
+    @Test
+    fun backgroundTabsSleepUnderMemoryPressureAndWake() {
+        loadPage("https://example.com/one", "<html><head><title>one</title></head><body>one</body></html>")
+        waitFor("tab one") { it.browser.current!!.title == "one" }
+        val first = onActivity { it.browser.current!! }
+        onActivity { it.browser.addTab() }
+        loadPage("https://example.com/two", "<html><head><title>two</title></head><body>two</body></html>")
+        waitFor("tab two") { it.browser.current!!.title == "two" }
+        assertFalse(first.asleep)
+
+        // Android reports critical memory: every background tab sleeps, the visible one doesn't.
+        onActivity { it.browser.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) }
+        assertTrue(first.asleep)
+        assertTrue(onActivity { first.view == null })
+        assertFalse(onActivity { it.browser.current!!.asleep })
+        assertEquals("https://example.com/one", first.url)
+
+        // Going back to it wakes it.
+        onActivity { it.browser.select(first) }
+        waitFor("tab one to wake") { !first.asleep && first.view != null }
+    }
+
+    @Test
+    fun restoredTabsStartAsleepExceptTheOneShown() {
+        launch(setupDone = true, session = "[\"https://example.com/a\",\"https://example.org/b\",\"https://example.net/c\"]")
+        assertEquals(3, onActivity { it.browser.tabs.size })
+        waitFor("the shown tab to wake") { !it.browser.tabs[0].asleep }
+        assertTrue(onActivity { it.browser.tabs[1].asleep && it.browser.tabs[1].view == null })
+        assertTrue(onActivity { it.browser.tabs[2].asleep && it.browser.tabs[2].view == null })
+    }
+
+    @Test
+    fun historyPluginRemembersAndForgets() {
+        loadPage("https://example.com/remember", "<html><head><title>remember me</title></head><body>x</body></html>")
+        waitFor("history entry") { a -> a.settings.history.any { it.title == "remember me" } }
+        // Switching the plugin off deletes what it kept.
+        onActivity { it.browser.setPlugin("history", false) }
+        assertTrue(onActivity { it.settings.history.isEmpty() })
     }
 
     /** Saves a half-size screenshot where the build collects extra test output. */
@@ -145,6 +299,11 @@ class SmokeTest {
     fun recordScreens() {
         try {
             shot("01-home")
+            compose.onNodeWithContentDescription("Open: Plugins").performScrollTo().performClick()
+            shot("16-plugins-available")
+            compose.onNodeWithText("Planned").performClick()
+            shot("17-plugins-planned")
+            compose.onNodeWithContentDescription("Back to the browser").performClick()
             compose.onNodeWithContentDescription("Open: Device care").performScrollTo().performClick()
             shot("02-care-security")
             compose.onNodeWithText("Storage").performClick()

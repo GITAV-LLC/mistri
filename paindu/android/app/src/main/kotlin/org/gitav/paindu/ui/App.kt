@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -34,14 +35,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.gitav.paindu.MainActivity
 
-enum class Screen { Browser, Care, Settings }
+enum class Screen { Browser, Care, Plugins, Settings }
 
 @Composable
 fun PainduApp(activity: MainActivity) {
+    val settings = activity.settings
     var screen by rememberSaveable { mutableStateOf(Screen.Browser) }
     val openUrl: (String) -> Unit = { url ->
         activity.browser.addTab(url)
         screen = Screen.Browser
+    }
+
+    // Out of screenshots and the recent-apps preview while the lock is on or a whush tab is showing.
+    val keepPrivate = settings.appLock.value || activity.browser.current?.whush == true
+    SideEffect { activity.setPrivateWindow(keepPrivate) }
+
+    if (!settings.setupDone.value) {
+        SetupScreen(activity)
+        return
+    }
+    if (activity.locked) {
+        LockScreen(activity)
+        return
     }
 
     when (screen) {
@@ -50,11 +65,21 @@ fun PainduApp(activity: MainActivity) {
             settings = activity.settings,
             shield = activity.shield,
             openCare = { screen = Screen.Care },
+            openPlugins = { screen = Screen.Plugins },
             openSettings = { screen = Screen.Settings },
         )
         Screen.Care -> {
             BackHandler { screen = Screen.Browser }
             CareScreen(activity.signatures, activity.resumeTick, onBack = { screen = Screen.Browser })
+        }
+        Screen.Plugins -> {
+            BackHandler { screen = Screen.Browser }
+            PluginsScreen(
+                activity,
+                openCare = { screen = Screen.Care },
+                openUrl = openUrl,
+                onBack = { screen = Screen.Browser },
+            )
         }
         Screen.Settings -> {
             BackHandler { screen = Screen.Browser }
@@ -107,7 +132,9 @@ fun TabbedPage(
                         )
                     }
                 }
-                if (tabs.size <= 3) {
+                if (tabs.isEmpty()) {
+                    // A page with a single topic has no tab row.
+                } else if (tabs.size <= 3) {
                     TabRow(selectedTabIndex = selected, containerColor = ground, tabs = tabItems)
                 } else {
                     ScrollableTabRow(

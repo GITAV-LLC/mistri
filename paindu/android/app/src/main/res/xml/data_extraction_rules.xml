@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and later. Only paindu's own settings file goes into Android's backup:
+     settings, bookmarks, the list of open tabs, and history if that plugin is on.
+     Cookies, site data and the cache are never backed up. The cloud backup is skipped
+     entirely unless it is end-to-end encrypted with the phone's screen lock. -->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="sharedpref" path="paindu.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="paindu.xml" />
+    </device-transfer>
+</data-extraction-rules>

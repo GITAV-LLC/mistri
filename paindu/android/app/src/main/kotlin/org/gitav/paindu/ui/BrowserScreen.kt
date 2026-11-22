@@ -97,10 +97,12 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import org.gitav.paindu.Link
 import org.gitav.paindu.R
 import org.gitav.paindu.Settings
 import org.gitav.paindu.browser.Browser
 import org.gitav.paindu.browser.Tab
+import org.gitav.paindu.plugins.Plugins
 import org.gitav.paindu.shield.FilterLists
 import org.gitav.paindu.shield.ShieldEngine
 
@@ -113,10 +115,20 @@ fun BrowserScreen(
     settings: Settings,
     shield: ShieldEngine,
     openCare: () -> Unit,
+    openPlugins: () -> Unit,
     openSettings: () -> Unit,
 ) {
     val tab = browser.current ?: return
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    // What is being typed in the address bar right now, or null when it isn't in use.
+    var typing by remember { mutableStateOf<String?>(null) }
+
+    // A sleeping tab gets its page back as soon as it is the one being looked at.
+    // A page that crashed waits for the user to ask.
+    LaunchedEffect(tab.id, tab.asleep, tab.crashed) {
+        if (tab.asleep && !tab.crashed) browser.pageOf(tab)
+    }
     var sheet by remember { mutableStateOf(Sheet.None) }
     var menuOpen by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -142,7 +154,9 @@ fun BrowserScreen(
         contentWindowInsets = WindowInsets.safeDrawing,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            Column(Modifier.background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
+            val barColor =
+                if (tab.whush) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+            Column(Modifier.background(barColor).statusBarsPadding()) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
@@ -156,7 +170,20 @@ fun BrowserScreen(
                             )
                         }
                     }
-                    AddressField(tab, onGo = { browser.load(tab, it) }, modifier = Modifier.weight(1f))
+                    if (tab.whush) {
+                        Icon(
+                            painterResource(R.drawable.ic_whush),
+                            contentDescription = "whush tab: forgotten when closed",
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                    AddressField(
+                        tab,
+                        onGo = { browser.load(tab, it) },
+                        onTyping = { typing = it },
+                        modifier = Modifier.weight(1f),
+                    )
                     IconButton(onClick = { sheet = Sheet.Tabs }) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
@@ -178,6 +205,7 @@ fun BrowserScreen(
                             settings = settings,
                             show = { sheet = it },
                             openCare = openCare,
+                            openPlugins = openPlugins,
                             openSettings = openSettings,
                             share = {
                                 val send = Intent(Intent.ACTION_SEND).setType("text/plain")
@@ -199,10 +227,19 @@ fun BrowserScreen(
         },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            if (tab.isHome) {
-                HomePage(settings, shield, openCare, openShield = { sheet = Sheet.Shield }) { browser.load(tab, it) }
-            } else {
-                WebContainer(tab)
+            val suggestions = suggestionsFor(typing, tab, settings)
+            when {
+                suggestions.isNotEmpty() -> Suggestions(suggestions) { url ->
+                    focusManager.clearFocus()
+                    browser.load(tab, url)
+                }
+                tab.isHome && tab.whush -> WhushHome()
+                tab.isHome -> HomePage(
+                    settings, shield, openCare, openPlugins,
+                    openShield = { sheet = Sheet.Shield },
+                ) { browser.load(tab, it) }
+                tab.asleep -> AsleepPage(tab) { browser.pageOf(tab) }
+                else -> WebContainer(tab, browser)
             }
         }
     }
@@ -215,7 +252,7 @@ fun BrowserScreen(
                         sheet = Sheet.None
                         openSettings()
                     }
-                    Sheet.Tabs -> TabsSheet(browser) { sheet = Sheet.None }
+                    Sheet.Tabs -> TabsSheet(browser, settings) { sheet = Sheet.None }
                     Sheet.Bookmarks -> LinksSheet(
                         title = "Bookmarks",
                         empty = "No bookmarks yet. Use the menu to bookmark a page.",
@@ -276,14 +313,14 @@ fun BrowserScreen(
 
 private fun countLabel(n: Int): String = if (n > 99) "99+" else n.toString()
 
-/** Hosts the current tab's WebView. Each tab keeps its own WebView alive while it is open. */
+/** Hosts the current tab's page. */
 @Composable
-private fun WebContainer(tab: Tab) {
+private fun WebContainer(tab: Tab, browser: Browser) {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx -> FrameLayout(ctx) },
         update = { box ->
-            val wv = tab.webView
+            val wv = browser.pageOf(tab)
             if (wv.parent !== box) {
                 box.removeAllViews()
                 (wv.parent as? ViewGroup)?.removeView(wv)
@@ -297,7 +334,12 @@ private fun WebContainer(tab: Tab) {
 }
 
 @Composable
-private fun AddressField(tab: Tab, onGo: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun AddressField(
+    tab: Tab,
+    onGo: (String) -> Unit,
+    onTyping: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     var value by remember { mutableStateOf(TextFieldValue("")) }
     var focused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -324,7 +366,10 @@ private fun AddressField(tab: Tab, onGo: (String) -> Unit, modifier: Modifier = 
             }
             BasicTextField(
                 value = value,
-                onValueChange = { value = it },
+                onValueChange = {
+                    if (it.text != value.text) onTyping(it.text)
+                    value = it
+                },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -338,6 +383,7 @@ private fun AddressField(tab: Tab, onGo: (String) -> Unit, modifier: Modifier = 
                     .onFocusChanged { state ->
                         focused = state.isFocused
                         if (state.isFocused) value = value.copy(selection = TextRange(0, value.text.length))
+                        else onTyping(null)
                     }
                     .semantics { contentDescription = "Address bar" },
             )
@@ -354,26 +400,28 @@ private fun BrowserMenu(
     settings: Settings,
     show: (Sheet) -> Unit,
     openCare: () -> Unit,
+    openPlugins: () -> Unit,
     openSettings: () -> Unit,
     share: () -> Unit,
 ) {
     DropdownMenu(expanded = open, onDismissRequest = close) {
         val onPage = !tab.isHome
         Row(Modifier.padding(horizontal = 4.dp)) {
-            IconButton(enabled = tab.canBack, onClick = { close(); tab.webView.goBack() }) {
+            IconButton(enabled = tab.canBack, onClick = { close(); tab.view?.goBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            IconButton(enabled = tab.canForward, onClick = { close(); tab.webView.goForward() }) {
+            IconButton(enabled = tab.canForward, onClick = { close(); tab.view?.goForward() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Forward")
             }
-            IconButton(enabled = onPage, onClick = { close(); tab.webView.reload() }) {
+            IconButton(enabled = onPage, onClick = { close(); tab.view?.reload() }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Reload")
             }
         }
         HorizontalDivider()
         MenuItem("New tab", close) { browser.addTab() }
+        if (settings.pluginOn(Plugins.WHUSH)) MenuItem("New whush tab", close) { browser.addWhushTab() }
         MenuItem("Bookmarks", close) { show(Sheet.Bookmarks) }
-        MenuItem("History", close) { show(Sheet.History) }
+        if (settings.pluginOn(Plugins.HISTORY)) MenuItem("History", close) { show(Sheet.History) }
         MenuItem(if (settings.isBookmarked(tab.url)) "Remove bookmark" else "Bookmark this page", close, onPage) {
             settings.toggleBookmark(tab.title, tab.url)
         }
@@ -383,7 +431,8 @@ private fun BrowserMenu(
         }
         MenuItem("Share", close, onPage, share)
         HorizontalDivider()
-        MenuItem("Device care", close, action = openCare)
+        if (settings.pluginOn(Plugins.CARE)) MenuItem("Device care", close, action = openCare)
+        MenuItem("Plugins", close, action = openPlugins)
         MenuItem("Settings", close, action = openSettings)
     }
 }
@@ -405,6 +454,7 @@ private fun HomePage(
     settings: Settings,
     shield: ShieldEngine,
     openCare: () -> Unit,
+    openPlugins: () -> Unit,
     openShield: () -> Unit,
     open: (String) -> Unit,
 ) {
@@ -434,13 +484,33 @@ private fun HomePage(
             button = "Open",
             onClick = openShield,
         )
+        if (settings.pluginOn(Plugins.CARE)) {
+            HomeTile(
+                icon = painterResource(R.drawable.ic_care),
+                title = "Device care",
+                detail = "Check apps for malware, see who has powerful access, and find what's using space.",
+                button = "Open",
+                onClick = openCare,
+            )
+        }
+        val pluginsOn = Plugins.ALL.count { settings.pluginOn(it.id) }
         HomeTile(
-            icon = rememberVectorPainter(Icons.Filled.Build),
-            title = "Device care",
-            detail = "Check apps for malware, see who has powerful access, and find what's using space.",
+            icon = painterResource(R.drawable.ic_plugin),
+            title = "Plugins",
+            detail = if (pluginsOn == 0) "paindu starts simple. Add private tabs, history or device care if you want them."
+            else "$pluginsOn switched on. Add or remove what you need.",
             button = "Open",
-            onClick = openCare,
+            onClick = openPlugins,
         )
+
+        if (settings.pluginOn(Plugins.HISTORY) && settings.history.isNotEmpty()) {
+            SectionCard("Continue where you left off", painterResource(R.drawable.ic_history)) {
+                for ((index, link) in settings.history.take(5).withIndex()) {
+                    if (index > 0) RowDivider()
+                    ActionRow(link.title, hostOf(link.url), "Open") { open(link.url) }
+                }
+            }
+        }
 
         if (settings.bookmarks.isNotEmpty()) {
             SectionCard("Bookmarks", rememberVectorPainter(Icons.Filled.Star)) {
@@ -504,7 +574,7 @@ private fun ShieldSheet(tab: Tab, browser: Browser, settings: Settings, shield: 
             onChange = {
                 settings.togglePaused(host)
                 browser.applySettings()
-                tab.webView.reload()
+                tab.view?.reload()
             },
         )
     }
@@ -515,13 +585,25 @@ private fun ShieldSheet(tab: Tab, browser: Browser, settings: Settings, shield: 
 }
 
 @Composable
-private fun TabsSheet(browser: Browser, close: () -> Unit) {
+private fun TabsSheet(browser: Browser, settings: Settings, close: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             "Tabs",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f).semantics { heading() },
         )
+        if (settings.pluginOn(Plugins.WHUSH)) {
+            OutlinedButton(
+                onClick = {
+                    browser.addWhushTab()
+                    close()
+                },
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Icon(painterResource(R.drawable.ic_whush), contentDescription = null)
+                Text("whush", Modifier.padding(start = 8.dp))
+            }
+        }
         FilledTonalButton(onClick = {
             browser.addTab()
             close()
@@ -561,7 +643,12 @@ private fun TabsSheet(browser: Browser, close: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge,
                     )
-                    if (!t.isHome) Muted(hostOf(t.url))
+                    val notes = listOfNotNull(
+                        if (t.isHome) null else hostOf(t.url),
+                        if (t.whush) "whush" else null,
+                        if (t.asleep) "asleep, saving memory" else null,
+                    )
+                    if (notes.isNotEmpty()) Muted(notes.joinToString(" · "))
                 }
                 IconButton(onClick = { browser.closeTab(t) }) {
                     Icon(Icons.Filled.Close, contentDescription = "Close tab")
@@ -576,7 +663,7 @@ private fun TabsSheet(browser: Browser, close: () -> Unit) {
 private fun LinksSheet(
     title: String,
     empty: String,
-    links: List<org.gitav.paindu.Link>,
+    links: List<Link>,
     onOpen: (String) -> Unit,
     onRemove: ((String) -> Unit)? = null,
     onClearAll: (() -> Unit)? = null,
@@ -606,6 +693,91 @@ private fun LinksSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+
+/** Address-bar suggestions: bookmarks always, and history when that plugin is on. */
+private fun suggestionsFor(typing: String?, tab: Tab, settings: Settings): List<Link> {
+    val query = typing?.trim().orEmpty()
+    if (query.length < 2 || query == tab.url) return emptyList()
+    val pool = if (!tab.whush && settings.pluginOn(Plugins.HISTORY)) settings.bookmarks + settings.history else settings.bookmarks
+    return pool.asSequence()
+        .filter { it.title.contains(query, ignoreCase = true) || it.url.contains(query, ignoreCase = true) }
+        .distinctBy { it.url }
+        .take(6)
+        .toList()
+}
+
+@Composable
+private fun Suggestions(links: List<Link>, open: (String) -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        SectionCard("From your bookmarks and history", rememberVectorPainter(Icons.Filled.Star)) {
+            for ((index, link) in links.withIndex()) {
+                if (index > 0) RowDivider()
+                ActionRow(link.title, hostOf(link.url), "Open") { open(link.url) }
+            }
+        }
+    }
+}
+
+/** Shown while a sleeping tab's page comes back, or after its page stopped working. */
+@Composable
+private fun AsleepPage(tab: Tab, wake: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_sleep),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(40.dp),
+        )
+        if (tab.crashed) {
+            Text("This page stopped working", style = MaterialTheme.typography.titleMedium)
+            Muted(hostOf(tab.url))
+            Button(onClick = wake) { Text("Reload") }
+        } else {
+            Text("Waking this tab…", style = MaterialTheme.typography.titleMedium)
+            Muted("It was asleep to save memory.")
+        }
+    }
+}
+
+/** The blank page of a whush tab: says plainly what whush does and doesn't do. */
+@Composable
+private fun WhushHome() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+    ) {
+        Spacer(Modifier.height(12.dp))
+        Icon(
+            painterResource(R.drawable.ic_whush),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(56.dp),
+        )
+        Text(
+            "whush",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.semantics { heading() },
+        )
+        Muted("This tab forgets everything when you close it.")
+        SectionCard("What whush does") {
+            Text("Keeps cookies, sign-ins and site data apart from your normal tabs.")
+            Text("Deletes all of it when the last whush tab is closed.")
+            Text("Adds nothing to history, and isn't reopened next time.")
+            Text("Keeps this tab out of screenshots and the recent-apps screen.")
+        }
+        SectionCard("What whush doesn't do") {
+            Text("It doesn't hide your browsing from your mobile network, Wi-Fi owner, employer or the sites you visit.")
+            Text("Files you download are kept.")
         }
     }
 }

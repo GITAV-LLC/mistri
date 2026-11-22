@@ -57,4 +57,24 @@ object Help {
             "If the phone feels slow, the usual causes are nearly full storage or one misbehaving " +
             "app, and both are shown here."
     const val RESTORE = "When you open paindu, bring back the tabs you had open last time."
+    const val APP_LOCK =
+        "paindu shows Android's own unlock prompt, so it accepts whatever unlocks your phone: " +
+            "fingerprint, face, PIN, pattern or password. paindu never sees or stores any of them. " +
+            "It locks again after it has been out of sight for a minute, and while the lock is on " +
+            "paindu is hidden from screenshots and the recent-apps screen. If you remove the phone's " +
+            "screen lock, this lock turns itself off."
+    const val DEFAULT_BROWSER =
+        "The default browser is the one Android uses when you tap a link in another app. paindu " +
+            "asks only when you press the button, and Android shows its own question to confirm."
+    const val SLEEPING_TABS =
+        "An open page can use hundreds of megabytes. paindu puts tabs you aren't looking at to " +
+            "sleep, keeping only their address and your place in them, and wakes them when you come " +
+            "back. It decides by how much memory the phone has free and how long since you used each " +
+            "tab, not by a fixed number: a phone with plenty of memory keeps more tabs awake."
+    const val BACKUP =
+        "If Android's backup is switched on for your Google account, Android saves paindu's " +
+            "settings, bookmarks and list of open tabs to your Google Drive, and history too if that " +
+            "plugin is on. paindu only allows this when the backup is end-to-end encrypted with your " +
+            "phone's screen lock, so neither Google nor GITAV can read it. Cookies, sign-ins and site " +
+            "data are never backed up. On a new phone, Android restores it when you install paindu."
 }

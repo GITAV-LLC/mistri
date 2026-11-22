@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,7 +85,7 @@ fun SettingsScreen(activity: MainActivity, openUrl: (String) -> Unit, onBack: ()
             1 -> BrowsingTab(activity)
             2 -> ReadingTab(activity)
             3 -> PrivacyTab(activity, openUrl)
-            else -> AboutTab(openUrl)
+            else -> AboutTab(activity, openUrl)
         }
     }
 }
@@ -194,6 +195,16 @@ private fun ShieldTab(activity: MainActivity) {
 private fun BrowsingTab(activity: MainActivity) {
     val settings = activity.settings
 
+    SectionCard("Default browser", rememberVectorPainter(Icons.Filled.Star), Help.DEFAULT_BROWSER) {
+        if (activity.isDefaultBrowser) {
+            Text("paindu is your default browser. Links from other apps open here.")
+            OutlinedButton(onClick = { activity.openDefaultAppsSettings() }) { Text("Change in Android settings") }
+        } else {
+            Text("Another browser opens the links you tap in other apps.")
+            Button(onClick = { activity.requestDefaultBrowser() }) { Text("Make paindu my default browser") }
+        }
+    }
+
     SectionCard("Search engine", rememberVectorPainter(Icons.Filled.Search)) {
         Muted("Used when you type words instead of a web address.")
         for (engine in SEARCH_ENGINES) {
@@ -208,6 +219,13 @@ private fun BrowsingTab(activity: MainActivity) {
             onChange = { settings.restoreTabs.value = it },
             help = Help.RESTORE,
         )
+    }
+
+    SectionCard("Sleeping tabs", painterResource(R.drawable.ic_sleep), Help.SLEEPING_TABS) {
+        val tabs = activity.browser.tabs
+        val asleep = tabs.count { it.asleep }
+        Text("${tabs.size} open, $asleep asleep to save memory.")
+        Muted("Tabs you aren't using are put to sleep when the phone runs short of memory, and wake when you return to them.")
     }
 }
 
@@ -275,6 +293,26 @@ private fun PrivacyTab(activity: MainActivity, openUrl: (String) -> Unit) {
         )
     }
 
+    SectionCard("Screen lock", rememberVectorPainter(Icons.Filled.Lock), Help.APP_LOCK) {
+        val lockOn = activity.settings.appLock.value
+        if (lockOn || activity.canUseScreenLock()) {
+            SwitchRow(
+                "Ask for my screen lock to open paindu",
+                lockOn,
+                onChange = { activity.setAppLock(it) },
+                detail = "Fingerprint, face, PIN, pattern or password",
+            )
+        } else {
+            Text("This phone has no screen lock yet. Set one in Android's settings, then come back.")
+            OutlinedButton(onClick = { activity.openScreenLockSettings() }) { Text("Open Android security settings") }
+        }
+    }
+
+    SectionCard("Backup to Google Drive", painterResource(R.drawable.ic_storage), Help.BACKUP) {
+        Text("Settings, bookmarks and open tabs are included in Android's own encrypted backup, if you have it switched on.")
+        Muted("Never included: cookies, sign-ins, site data, and anything from whush tabs.")
+    }
+
     SectionCard("Browsing data", rememberVectorPainter(Icons.Filled.Delete)) {
         Muted("Cookies, site data, the cache and your history. Bookmarks and settings are kept.")
         OutlinedButton(
@@ -312,7 +350,7 @@ private fun PrivacyTab(activity: MainActivity, openUrl: (String) -> Unit) {
 // ---------------------------------------------------------------- About
 
 @Composable
-private fun AboutTab(openUrl: (String) -> Unit) {
+private fun AboutTab(activity: MainActivity, openUrl: (String) -> Unit) {
     SectionCard("About paindu", rememberVectorPainter(Icons.Filled.Info)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Image(painterResource(R.drawable.paindu_logo), contentDescription = null, modifier = Modifier.size(64.dp))
@@ -327,6 +365,7 @@ private fun AboutTab(openUrl: (String) -> Unit) {
         )
         Muted("Free and open source under the MIT licence.")
         Button(onClick = { openUrl(SOURCE_URL) }) { Text("View the source code") }
+        OutlinedButton(onClick = { activity.settings.setupDone.value = false }) { Text("Run the setup walkthrough again") }
     }
 
     SectionCard("Open-source credits", rememberVectorPainter(Icons.Filled.Favorite)) {

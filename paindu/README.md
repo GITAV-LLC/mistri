@@ -31,6 +31,8 @@ paindu is a separate product from [mistri](../README.md), GITAV's Windows repair
 
 ## paindu for Android
 
+paindu itself is deliberately small: tabs, bookmarks, downloads and Shield. Everything else is a **plugin** that is off until you switch it on. The first time paindu opens, a four-step walkthrough offers the choices below; each step can be skipped, and paindu never asks again or sends notifications.
+
 **Browser** (pages are rendered by Android System WebView, the Chromium engine Google keeps updated):
 
 | Feature | How |
@@ -44,8 +46,22 @@ paindu is a separate product from [mistri](../README.md), GITAV's Windows repair
 | Third-party cookies | Refused |
 | Downloads | Fingerprinted and checked against known malware before they reach the Downloads folder |
 | Reading | Reader view and Read aloud (Mozilla Readability + the phone's text-to-speech), page text size |
+| Sleeping tabs | Tabs you aren't looking at are put to sleep, keeping only their address and position. The decision goes by free memory, Android's memory warnings, the phone's RAM and how long since each tab was used, not by a fixed tab count. Restored tabs start asleep |
+| Default browser | One button in the walkthrough and in Settings › Browsing. paindu never asks on its own |
+| Screen lock | Optional: Android's own fingerprint / face / PIN / pattern prompt before paindu opens. Locks again after a minute out of sight |
+| Backup | Settings, bookmarks and open tabs are included in Android's backup to the user's Google Drive, only when that backup is end-to-end encrypted with the screen lock. Cookies and site data are never included |
 
-**Device care** reports and never acts on its own. Android does not let one app stop, clean or change another, so each finding has a button that opens the matching Android settings screen.
+**Plugins** (all off by default; see [PLUGINS.md](PLUGINS.md) for the draft protocol):
+
+| Plugin | What it adds | Status |
+|---|---|---|
+| whush | Private tabs with their own cookies, storage and cache, deleted when the last whush tab closes. Not in history, not restored, not in screenshots | Available |
+| History | paindu keeps no history without it. Adds history, address-bar suggestions and "continue where you left off". Switching it off deletes the history | Available |
+| Device care | The Security, Storage and Health checks below | Available |
+| Passwords | Encrypted vault unlocked by the screen lock; breach check on import; no plain-text export | Planned |
+| Bring your own VPN | Route only paindu's traffic through a WireGuard server the user chooses. GITAV runs no servers | Planned |
+
+**Device care** (a plugin) reports and never acts on its own. Android does not let one app stop, clean or change another, so each finding has a button that opens the matching Android settings screen.
 
 | Tab | Sections |
 |---|---|
@@ -63,7 +79,12 @@ paindu is a separate product from [mistri](../README.md), GITAV's Windows repair
 - **The signature database needs a one-time setup** before it exists (below). Until then the scanner says so and downloads are saved unchecked.
 - **Blocking is inside this browser only.** Device-wide ad blocking needs a VPN service, which Google Play does not allow to interfere with ads.
 - **Whole-domain rules only:** ads served from a site's own domain, such as YouTube's, aren't blocked.
-- **Not a full Chrome.** No extensions, sync, private tabs, find-in-page or desktop-site mode yet. Camera, microphone and location requests from pages are declined.
+- **Not a full Chrome.** No extensions, sync, find-in-page or desktop-site mode yet. Camera, microphone and location requests from pages are declined.
+- **whush is separation, not invisibility.** It doesn't hide browsing from the network, an employer or the sites visited. It needs a recent Android System WebView; on older ones the plugin says so and stays off.
+- **Sites are already kept apart, with one caveat.** One site can never read another site's cookies, and third-party cookies are refused, which removes the usual cross-site tracking route. The browser engine also keys its cache by site. A site you visit directly still keeps its own cookies between visits unless you use whush or clear browsing data.
+- **Sleeping tabs can't tell if a background tab is playing audio.** Such a tab may be put to sleep under memory pressure.
+- **The screen lock has not been exercised on a phone with a lock set.** The emulator has none; only the refusal path is tested.
+- **Android's backup is controlled by Android**, not by a paindu switch: it runs if the user has backup on for their Google account.
 - **Third-party test is approximate.** Without the full Public Suffix List, unusual country-code domains may be treated as the same site, which means not blocked.
 
 ### Build
@@ -102,9 +123,11 @@ android/app/src/main/
     shield/                   FilterLists (list parser), ShieldEngine
     browser/                  Browser (tabs, WebView clients), Downloader
     care/                     Care (device checks), HashDb, Signatures
+    plugins/                  the catalogue of built-in plugins
     ui/                       Compose screens, theme, ⓘ help texts
   assets/                     page scripts (cookie reject, pop-up guard, ad-box CSS), Readability.js
 android/tools/                build_signatures.py, ci_gradle.sh
+PLUGINS.md                    draft plugin protocol
 PRIVACY.md
 ```
 

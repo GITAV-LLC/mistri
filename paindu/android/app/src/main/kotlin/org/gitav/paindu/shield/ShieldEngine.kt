@@ -99,7 +99,10 @@ class ShieldEngine(private val context: Context, private val settings: Settings)
     }
 
     /** True when the lists are more than a day old (or have never been downloaded). */
-    fun isStale(): Boolean = System.currentTimeMillis() - lastUpdate > 24L * 60 * 60 * 1000
+    fun isStale(): Boolean =
+        System.currentTimeMillis() - lastUpdate > 24L * 60 * 60 * 1000 ||
+            // Settings restored from a backup say "updated" although the lists themselves weren't restored.
+            !File(listDir, "${FilterLists.LISTS[0].id}.txt").exists()
 
     /** Download every list again. Lists that fail keep their previous copy. */
     suspend fun update() {

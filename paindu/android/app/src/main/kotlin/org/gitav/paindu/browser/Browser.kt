@@ -1,9 +1,13 @@
 package org.gitav.paindu.browser
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
+import android.content.ComponentCallbacks2
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -30,6 +34,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.webkit.ProfileStore
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
@@ -40,6 +45,7 @@ import kotlinx.coroutines.launch
 import org.gitav.paindu.MainActivity
 import org.gitav.paindu.Settings
 import org.gitav.paindu.care.Signatures
+import org.gitav.paindu.plugins.Plugins
 import org.gitav.paindu.shield.FilterLists
 import org.gitav.paindu.shield.ShieldEngine
 import org.json.JSONArray
@@ -52,7 +58,18 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
 /** One browser tab. The properties Compose reads are snapshot state. */
-class Tab(val id: Int, val webView: WebView) {
+class Tab(val id: Int, val whush: Boolean = false) {
+    /** The page itself. Null for a blank tab and while the tab is asleep. */
+    var view: WebView? = null
+
+    /** True when the page has been put away to save memory. Its address and position are kept. */
+    var asleep by mutableStateOf(false)
+
+    /** True when the page stopped working; it reloads only when the user asks. */
+    var crashed by mutableStateOf(false)
+    var saved: Bundle? = null
+    var lastActive: Long = SystemClock.elapsedRealtime()
+
     var title by mutableStateOf("")
     var url by mutableStateOf("")
     var progress by mutableIntStateOf(100)
@@ -72,6 +89,9 @@ class Tab(val id: Int, val webView: WebView) {
     var readerPending = false
     var script: ScriptHandler? = null
 }
+
+/** How short of memory the phone says it is. */
+enum class Pressure { NONE, LOW, CRITICAL }
 
 /** A short message for the user, optionally with one action they can choose to take. */
 class Notice(val text: String, val actionLabel: String? = null, val action: (() -> Unit)? = null)
@@ -110,17 +130,21 @@ class Browser(
 
     // ------------------------------------------------------------ tabs
 
-    fun addTab(url: String? = null, select: Boolean = true): Tab {
-        val tab = createTab()
+    fun addTab(url: String? = null, select: Boolean = true, whush: Boolean = false): Tab {
+        val tab = Tab(nextId++, whush)
         tabs.add(tab)
-        if (select) currentIndex = tabs.lastIndex
+        if (select) select(tab)
         if (!url.isNullOrBlank()) load(tab, url)
         return tab
     }
 
     fun select(tab: Tab) {
         val i = tabs.indexOf(tab)
-        if (i >= 0) currentIndex = i
+        if (i < 0) return
+        current?.lastActive = SystemClock.elapsedRealtime()
+        currentIndex = i
+        tab.lastActive = SystemClock.elapsedRealtime()
+        tidyMemory()
     }
 
     fun closeTab(tab: Tab) {
@@ -128,6 +152,7 @@ class Browser(
         if (i < 0) return
         tabs.removeAt(i)
         destroy(tab)
+        if (tab.whush) forgetWhushIfDone()
         if (tabs.isEmpty()) {
             addTab()
             return
@@ -137,18 +162,158 @@ class Browser(
     }
 
     private fun destroy(tab: Tab) {
-        val wv = tab.webView
+        val wv = tab.view ?: return
+        tab.view = null
+        tab.script = null
         (wv.parent as? ViewGroup)?.removeView(wv)
         wv.stopLoading()
         wv.destroy()
     }
 
+    /**
+     * The tab's page, created or woken if need be. A blank tab has no page at all
+     * until something is loaded in it, and a sleeping tab gets its page back here.
+     */
+    fun pageOf(tab: Tab): WebView {
+        tab.view?.let { return it }
+        val wv = buildView(tab)
+        tab.view = wv
+        val saved = tab.saved
+        tab.saved = null
+        val restored = saved != null && wv.restoreState(saved) != null
+        if (!restored && tab.url.isNotEmpty()) wv.loadUrl(tab.url)
+        tab.asleep = false
+        tab.crashed = false
+        return wv
+    }
+
+    // ------------------------------------------------------------ sleeping tabs
+
+    /**
+     * Put a background tab's page away. A page costs tens to hundreds of megabytes;
+     * its address, title and back/forward position cost almost nothing, and that is
+     * all that is kept. The page comes back when the tab is opened again.
+     */
+    fun sleep(tab: Tab) {
+        val wv = tab.view ?: return
+        if (tab === current) return
+        if (tab.url.isNotEmpty()) {
+            val state = Bundle()
+            tab.saved = if (wv.saveState(state) != null) state else null
+            tab.asleep = true
+        }
+        destroy(tab)
+    }
+
+    /** How many background tabs may stay awake on this phone when memory isn't tight. */
+    private val awakeBudget: Int by lazy {
+        val info = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(info)
+        (info.totalMem / 1_000_000_000.0 * 1.5).toInt().coerceIn(2, 8)
+    }
+
+    private val activityManager: ActivityManager
+        get() = activity.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+
+    /**
+     * Decide which background tabs should sleep. This goes by what the phone is
+     * actually short of, not by a fixed number of tabs:
+     *  - when Android says memory is critical, every background tab sleeps;
+     *  - when memory is low (Android says so, or under an eighth is free), only the
+     *    most recently used background tab stays awake;
+     *  - otherwise a phone keeps awake as many as its RAM comfortably allows
+     *    (2 on a small phone, up to 8 on a large one), and any tab not looked at
+     *    for half an hour sleeps regardless.
+     */
+    fun tidyMemory(pressure: Pressure = Pressure.NONE) {
+        val now = SystemClock.elapsedRealtime()
+        val awake = tabs.filter { it !== current && it.view != null }.sortedBy { it.lastActive }
+        if (awake.isEmpty()) return
+        val info = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(info)
+        val tight = info.lowMemory || info.availMem < info.totalMem / 8
+        val keep = when {
+            pressure == Pressure.CRITICAL -> 0
+            pressure == Pressure.LOW || tight -> 1
+            else -> awakeBudget
+        }
+        val keepers = awake.takeLast(keep).filter { now - it.lastActive < IDLE_SLEEP_MS }
+        for (tab in awake) if (tab !in keepers) sleep(tab)
+    }
+
+    /** Android's own memory warnings, passed on by the activity. */
+    @Suppress("DEPRECATION")
+    fun onTrimMemory(level: Int) {
+        val pressure = when {
+            level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> Pressure.NONE
+            level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> Pressure.CRITICAL
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> Pressure.CRITICAL
+            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> Pressure.LOW
+            else -> Pressure.NONE
+        }
+        tidyMemory(pressure)
+    }
+
+    // ------------------------------------------------------------ whush (private tabs)
+
+    /** whush needs a web engine recent enough to keep separate profiles. */
+    val whushSupported: Boolean
+        get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+
+    fun addWhushTab(): Tab? {
+        if (!whushSupported) {
+            notice = Notice("whush needs a newer Android System WebView. Update it in the Play Store.")
+            return null
+        }
+        return addTab(whush = true)
+    }
+
+    fun closeWhushTabs() {
+        tabs.filter { it.whush }.forEach { closeTab(it) }
+    }
+
+    /** Once the last whush tab is closed, delete everything whush tabs stored. */
+    private fun forgetWhushIfDone() {
+        if (!whushSupported || tabs.any { it.whush }) return
+        // The pages have to be fully gone before their profile can be deleted.
+        main.postDelayed({ deleteWhushProfile() }, 400)
+    }
+
+    private fun deleteWhushProfile(attempt: Int = 0) {
+        if (!whushSupported || tabs.any { it.whush }) return
+        try {
+            val store = ProfileStore.getInstance()
+            if (WHUSH_PROFILE in store.allProfileNames) store.deleteProfile(WHUSH_PROFILE)
+        } catch (e: Exception) {
+            // A closed page can hold its profile for a moment longer. Try again shortly;
+            // failing that, it is deleted the next time paindu starts.
+            if (attempt < 5) main.postDelayed({ deleteWhushProfile(attempt + 1) }, 500)
+        }
+    }
+
+    private fun cookiesFor(tab: Tab): CookieManager =
+        if (tab.whush) ProfileStore.getInstance().getOrCreateProfile(WHUSH_PROFILE).cookieManager
+        else CookieManager.getInstance()
+
+    // ------------------------------------------------------------ session
+
     /** Reopen the tabs from last time, plus a link another app asked us to open. */
     fun restore(incoming: String?) {
+        deleteWhushProfile() // left over if paindu was killed with whush tabs open
         if (settings.restoreTabs.value) {
             try {
                 val saved = JSONArray(settings.prefs.getString("session", "[]") ?: "[]")
-                for (i in 0 until minOf(saved.length(), MAX_RESTORED_TABS)) addTab(saved.optString(i))
+                for (i in 0 until minOf(saved.length(), MAX_RESTORED_TABS)) {
+                    // Restored tabs start asleep: only the one being looked at loads.
+                    val tab = Tab(nextId++)
+                    val url = saved.optString(i)
+                    if (url.startsWith("http://") || url.startsWith("https://")) {
+                        tab.url = url
+                        tab.title = Uri.parse(url).host ?: url
+                        tab.asleep = true
+                    }
+                    tabs.add(tab)
+                }
                 val index = settings.prefs.getInt("sessionIndex", 0)
                 if (tabs.isNotEmpty()) currentIndex = index.coerceIn(0, tabs.lastIndex)
             } catch (e: Exception) {
@@ -160,9 +325,11 @@ class Browser(
     }
 
     fun saveSession() {
+        val kept = tabs.filter { !it.whush } // whush tabs are never written down
         val arr = JSONArray()
-        for (t in tabs) arr.put(t.url)
-        settings.prefs.edit().putString("session", arr.toString()).putInt("sessionIndex", currentIndex).apply()
+        for (t in kept) arr.put(t.url)
+        val index = kept.indexOf(current).coerceAtLeast(0)
+        settings.prefs.edit().putString("session", arr.toString()).putInt("sessionIndex", index).apply()
     }
 
     fun destroy() {
@@ -172,6 +339,14 @@ class Browser(
         scope.cancel()
         tabs.toList().forEach { destroy(it) }
         tabs.clear()
+        deleteWhushProfile()
+    }
+
+    /** Switch a plugin on or off, with whatever tidying up that needs. */
+    fun setPlugin(id: String, on: Boolean) {
+        settings.setPlugin(id, on)
+        if (!on && id == Plugins.HISTORY) settings.clearHistory()
+        if (!on && id == Plugins.WHUSH) closeWhushTabs()
     }
 
     // ------------------------------------------------------------ navigation
@@ -191,7 +366,7 @@ class Browser(
 
     fun load(tab: Tab, input: String) {
         val url = toUrl(input)
-        if (url == HOME) goHome(tab) else tab.webView.loadUrl(url)
+        if (url == HOME) goHome(tab) else pageOf(tab).loadUrl(url)
     }
 
     fun goHome(tab: Tab) {
@@ -199,19 +374,25 @@ class Browser(
         tab.title = ""
         tab.blocked = 0
         tab.reader = false
-        tab.webView.loadUrl(HOME)
+        tab.asleep = false
+        tab.crashed = false
+        tab.saved = null
+        // A blank tab needs no page at all. Let any callback that led here finish first.
+        main.post { if (tab.isHome) destroy(tab) }
     }
 
     fun back(tab: Tab) {
-        if (tab.webView.canGoBack()) tab.webView.goBack() else goHome(tab)
+        val wv = tab.view
+        if (wv != null && wv.canGoBack()) wv.goBack() else goHome(tab)
     }
 
     /** Re-apply settings that are baked into each tab (page script, text size, Safe Browsing). */
     fun applySettings() {
         for (tab in tabs) {
+            val wv = tab.view ?: continue
             installScript(tab)
-            tab.webView.settings.textZoom = pageTextZoom()
-            tab.webView.settings.safeBrowsingEnabled = settings.safeBrowsing.value
+            wv.settings.textZoom = pageTextZoom()
+            wv.settings.safeBrowsingEnabled = settings.safeBrowsing.value
         }
     }
 
@@ -222,8 +403,10 @@ class Browser(
         CookieManager.getInstance().removeAllCookies(null)
         WebStorage.getInstance().deleteAllData()
         for (tab in tabs) {
-            tab.webView.clearCache(true)
-            tab.webView.clearFormData()
+            tab.saved = null
+            val wv = tab.view ?: continue
+            wv.clearCache(true)
+            wv.clearFormData()
         }
         settings.clearHistory()
         notice = Notice("Cookies, site data, cache and history cleared.")
@@ -243,7 +426,7 @@ class Browser(
                 notice = Notice("Reader view couldn't find an article on this page.")
             } else {
                 tab.readerPending = true
-                tab.webView.loadDataWithBaseURL(
+                pageOf(tab).loadDataWithBaseURL(
                     pageUrl, readerPage(article?.optString("t").orEmpty(), content), "text/html", "utf-8", pageUrl,
                 )
             }
@@ -270,7 +453,7 @@ class Browser(
         val js = "(function(){\n$readabilityJs\ntry{var a=new Readability(document.cloneNode(true)).parse();" +
             "return a?JSON.stringify({t:a.title||'',c:a.content||'',x:a.textContent||''}):'';}" +
             "catch(e){return '';}})()"
-        tab.webView.evaluateJavascript(js) { raw ->
+        pageOf(tab).evaluateJavascript(js) { raw ->
             val article = try {
                 val inner = JSONTokener(raw ?: "null").nextValue() as? String
                 if (inner.isNullOrEmpty()) null else JSONObject(inner)
@@ -367,9 +550,17 @@ class Browser(
     // ------------------------------------------------------------ building a tab
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createTab(): Tab {
+    private fun buildView(tab: Tab): WebView {
         val wv = WebView(activity)
-        val tab = Tab(nextId++, wv)
+        tab.view = wv
+        if (tab.whush) {
+            // Must happen before the page is used for anything: whush tabs keep their
+            // cookies, storage and cache in a profile of their own.
+            ProfileStore.getInstance().getOrCreateProfile(WHUSH_PROFILE)
+            WebViewCompat.setProfile(wv, WHUSH_PROFILE)
+        }
+        // Let Android reclaim a background tab's memory before a visible one's.
+        wv.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
         wv.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -391,29 +582,32 @@ class Browser(
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(wv.settings, true)
         }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(wv, false)
+        // One site's cookies are never sent along with requests made from another site.
+        cookiesFor(tab).setAcceptThirdPartyCookies(wv, false)
         wv.webViewClient = Client(tab)
         wv.webChromeClient = Chrome(tab)
         wv.setDownloadListener { url, userAgent, contentDisposition, mime, length ->
             if (url.startsWith("http://") || url.startsWith("https://")) {
                 pendingDownload = DownloadRequest(
                     url, URLUtil.guessFileName(url, contentDisposition, mime), mime, length, userAgent,
+                    cookiesFor(tab).getCookie(url),
                 )
             } else {
                 notice = Notice("This kind of download isn't supported yet.")
             }
         }
         installScript(tab)
-        return tab
+        return wv
     }
 
     private fun installScript(tab: Tab) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        val wv = tab.view ?: return
         tab.script?.remove()
         tab.script = null
         val js = shield.pageScript()
         if (js.isNotEmpty()) {
-            tab.script = WebViewCompat.addDocumentStartJavaScript(tab.webView, js, setOf("*"))
+            tab.script = WebViewCompat.addDocumentStartJavaScript(wv, js, setOf("*"))
         }
     }
 
@@ -453,12 +647,12 @@ class Browser(
         val parts = uri.pathSegments
         if (parts.size < 2 || parts[0] != token) return
         when (parts[1]) {
-            "back" -> back(tab)
+            "back" -> main.post { back(tab) }
             "proceed" -> {
                 val target = uri.getQueryParameter("u") ?: return
                 val host = Uri.parse(target).host ?: return
                 shield.allowOnce(host)
-                tab.webView.loadUrl(target)
+                pageOf(tab).loadUrl(target)
             }
         }
     }
@@ -582,7 +776,7 @@ class Browser(
             } else {
                 tab.title = view.title ?: ""
                 if (address.startsWith("http") && !tab.reader && tab.warnedHost.isEmpty()) {
-                    settings.addHistory(tab.title, address)
+                    if (!tab.whush && settings.pluginOn(Plugins.HISTORY)) settings.addHistory(tab.title, address)
                 }
             }
             tab.canBack = view.canGoBack()
@@ -603,9 +797,17 @@ class Browser(
         }
 
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            // The page's process is gone: either it crashed, or Android took its memory back.
+            // Keep the tab and its address; the page reloads when the tab is next opened.
+            val crashed = detail.didCrash()
             main.post {
-                closeTab(tab)
-                notice = Notice("A page stopped working, so its tab was closed.")
+                destroy(tab)
+                tab.saved = null
+                if (tab.url.isNotEmpty()) {
+                    tab.asleep = true
+                    tab.crashed = crashed && tab === current
+                }
+                if (tab.crashed) notice = Notice("This page stopped working.")
             }
             return true
         }
@@ -630,9 +832,9 @@ class Browser(
             }
             val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
             lastWindowAt = now
-            val opened = addTab()
+            val opened = addTab(whush = tab.whush)
             opened.openedByPageAt = now
-            transport.webView = opened.webView
+            transport.webView = pageOf(opened)
             resultMsg.sendToTarget()
             return true
         }
@@ -667,6 +869,8 @@ class Browser(
         private const val POPUP_WINDOW_MS = 8000L
         private const val MAX_RESTORED_TABS = 12
         private const val LAST = "last"
+        private const val WHUSH_PROFILE = "whush"
+        private const val IDLE_SLEEP_MS = 30L * 60 * 1000
 
         /** Text-to-speech takes a few thousand characters at a time; split on sentence ends. */
         fun chunksForSpeech(text: String, limit: Int = 3000): List<String> {

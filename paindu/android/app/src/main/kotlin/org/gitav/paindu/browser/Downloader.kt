@@ -5,7 +5,6 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.webkit.CookieManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.gitav.paindu.care.Signatures
@@ -21,6 +20,8 @@ data class DownloadRequest(
     val mime: String?,
     val size: Long,
     val userAgent: String,
+    /** The cookies to send, taken from the tab's own cookie store (whush tabs have a separate one). */
+    val cookies: String? = null,
 )
 
 sealed class DownloadResult {
@@ -48,7 +49,7 @@ class Downloader(private val context: Context, private val signatures: Signature
             conn.connectTimeout = 15000
             conn.readTimeout = 60000
             conn.setRequestProperty("User-Agent", request.userAgent)
-            CookieManager.getInstance().getCookie(request.url)?.let { conn.setRequestProperty("Cookie", it) }
+            request.cookies?.let { conn.setRequestProperty("Cookie", it) }
             val digest = MessageDigest.getInstance("SHA-256")
             try {
                 if (conn.responseCode !in 200..299) throw IOException("the site answered ${conn.responseCode}")

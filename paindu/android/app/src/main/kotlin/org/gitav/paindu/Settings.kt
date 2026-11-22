@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import org.gitav.paindu.plugins.Plugins
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -47,6 +48,21 @@ class Settings(context: Context) {
     val autoUpdate = BoolPref(prefs, "autoUpdate", true)
     val safeBrowsing = BoolPref(prefs, "safeBrowsing", true)
     val restoreTabs = BoolPref(prefs, "restoreTabs", true)
+
+    /** False until the first-run walkthrough has been finished or skipped. */
+    val setupDone = BoolPref(prefs, "setupDone", false)
+
+    /** Ask for the phone's screen lock before paindu opens. */
+    val appLock = BoolPref(prefs, "appLock", false)
+
+    // Plugins: every one is off until the user switches it on.
+    private val pluginPrefs = Plugins.ALL.associate { it.id to BoolPref(prefs, "plugin.${it.id}", false) }
+
+    fun pluginOn(id: String): Boolean = pluginPrefs[id]?.value == true
+
+    fun setPlugin(id: String, on: Boolean) {
+        pluginPrefs[id]?.value = on
+    }
 
     var searchEngine by mutableStateOf(prefs.getString("searchEngine", "duckduckgo") ?: "duckduckgo")
         private set
