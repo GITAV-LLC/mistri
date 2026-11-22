@@ -272,6 +272,10 @@ class Browser(
         tabs.filter { it.whush }.forEach { closeTab(it) }
     }
 
+    /** Why the last attempt to delete whush's data didn't succeed, if it didn't. For diagnosis. */
+    var whushCleanupNote: String? = null
+        private set
+
     /** Once the last whush tab is closed, delete everything whush tabs stored. */
     private fun forgetWhushIfDone() {
         if (!whushSupported || tabs.any { it.whush }) return
@@ -287,6 +291,7 @@ class Browser(
         } catch (e: Exception) {
             // A closed page can hold its profile for a moment longer. Try again shortly;
             // failing that, it is deleted the next time paindu starts.
+            whushCleanupNote = "${e.javaClass.simpleName}: ${e.message}"
             if (attempt < 5) main.postDelayed({ deleteWhushProfile(attempt + 1) }, 500)
         }
     }
@@ -789,8 +794,11 @@ class Browser(
                 // The committed address is what requests are judged against. This also covers
                 // redirects and pages shown from text (reader view), which never pass through
                 // shouldInterceptRequest as a main-frame request.
+                val host = Uri.parse(address).host?.lowercase() ?: ""
                 tab.url = address
-                tab.pageHost = Uri.parse(address).host?.lowercase() ?: ""
+                tab.pageHost = host
+                // Having left a warning page, later pages are ordinary pages again.
+                if (host != tab.warnedHost) tab.warnedHost = ""
             }
             tab.canBack = view.canGoBack()
             tab.canForward = view.canGoForward()

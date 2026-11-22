@@ -209,35 +209,40 @@ class SmokeTest {
     fun whushTabsKeepTheirOwnCookiesAndForgetThem() {
         assumeTrue("this emulator's web engine is too old for whush", onActivity { it.browser.whushSupported })
         val cookies = android.webkit.CookieManager.getInstance()
+        fun normalCookies(): String = onActivity { cookies.getCookie("https://example.com/") } ?: ""
+
         // A normal tab sets a cookie.
         loadPage("https://example.com/", "<html><head><title>normal</title></head><body><script>document.cookie='seen=normal; path=/; max-age=600';document.title='normal-set'</script></body></html>")
         waitFor("the normal tab's cookie") { it.browser.current!!.title == "normal-set" }
-        assertTrue((onActivity { cookies.getCookie("https://example.com/") } ?: "").contains("seen=normal"))
+        assertTrue("normal tab's cookie should be stored, got '${normalCookies()}'", normalCookies().contains("seen=normal"))
 
         // A whush tab on the same site can't see it, and its own cookie stays out of the normal store.
         onActivity { it.browser.addWhushTab() }
-        assertTrue(onActivity { it.browser.current!!.whush })
+        assertTrue("the new tab should be a whush tab", onActivity { it.browser.current!!.whush })
         loadPage("https://example.com/", "<html><head><title>w</title></head><body><script>var had=document.cookie.indexOf('seen=normal')>=0;document.cookie='seen=whush; path=/; max-age=600';document.title=had?'leaked':'separate'</script></body></html>")
         waitFor("the whush tab to run") { it.browser.current!!.title == "separate" || it.browser.current!!.title == "leaked" }
-        assertEquals("separate", onActivity { it.browser.current!!.title })
+        assertEquals("a whush tab must not see normal cookies", "separate", onActivity { it.browser.current!!.title })
         Thread.sleep(500)
-        assertFalse((onActivity { cookies.getCookie("https://example.com/") } ?: "").contains("seen=whush"))
+        assertFalse("a whush cookie must not reach the normal store, got '${normalCookies()}'", normalCookies().contains("seen=whush"))
 
         // whush leaves no history and isn't saved for next time.
-        assertTrue(onActivity { a -> a.settings.history.none { it.title == "separate" } })
+        assertTrue("whush pages must not be in history", onActivity { a -> a.settings.history.none { it.title == "separate" } })
         onActivity { it.browser.saveSession() }
         val saved = context.getSharedPreferences("paindu", Context.MODE_PRIVATE).getString("session", "") ?: ""
-        assertEquals(1, org.json.JSONArray(saved).length())
+        assertEquals("only the normal tab is saved: $saved", 1, org.json.JSONArray(saved).length())
 
         // Closing the last whush tab deletes the whole compartment.
         onActivity { it.browser.closeWhushTabs() }
-        Thread.sleep(2500)
-        assertFalse(onActivity { androidx.webkit.ProfileStore.getInstance().allProfileNames.contains("whush") })
+        Thread.sleep(4000)
+        val left = onActivity { androidx.webkit.ProfileStore.getInstance().allProfileNames.toString() }
+        val note = onActivity { it.browser.whushCleanupNote }
+        assertFalse("the whush profile should be deleted; profiles=$left note=$note", left.contains("whush"))
+
         // A fresh whush tab starts with nothing.
         onActivity { it.browser.addWhushTab() }
         loadPage("https://example.com/", "<html><head><title>w2</title></head><body><script>document.title=document.cookie.indexOf('seen=whush')>=0?'remembered':'forgotten'</script></body></html>")
         waitFor("the second whush tab") { it.browser.current!!.title == "forgotten" || it.browser.current!!.title == "remembered" }
-        assertEquals("forgotten", onActivity { it.browser.current!!.title })
+        assertEquals("a new whush tab must start empty", "forgotten", onActivity { it.browser.current!!.title })
     }
 
     @Test
