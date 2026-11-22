@@ -19,6 +19,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -76,6 +77,9 @@ class SmokeTest {
         val end = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < end) {
             if (onActivity(condition)) return
+            // Under test, Compose only draws a new frame when asked to; some things
+            // (waking a sleeping tab) happen as a result of a frame.
+            compose.mainClock.advanceTimeByFrame()
             Thread.sleep(250)
         }
         val state = onActivity { a ->
@@ -107,7 +111,7 @@ class SmokeTest {
 
         // Plugins: Available, Planned
         compose.onNodeWithContentDescription("Open: Plugins").performScrollTo().performClick()
-        compose.onNodeWithText("Use whush").assertExists()
+        if (onActivity { it.browser.whushSupported }) compose.onNodeWithText("Use whush").assertExists()
         compose.onNodeWithText("Use History").assertExists()
         compose.onNodeWithText("Planned").performClick()
         compose.onNodeWithText("Passwords").assertExists()
@@ -203,7 +207,7 @@ class SmokeTest {
 
     @Test
     fun whushTabsKeepTheirOwnCookiesAndForgetThem() {
-        if (!onActivity { it.browser.whushSupported }) return
+        assumeTrue("this emulator's web engine is too old for whush", onActivity { it.browser.whushSupported })
         val cookies = android.webkit.CookieManager.getInstance()
         // A normal tab sets a cookie.
         loadPage("https://example.com/", "<html><head><title>normal</title></head><body><script>document.cookie='seen=normal; path=/; max-age=600';document.title='normal-set'</script></body></html>")
